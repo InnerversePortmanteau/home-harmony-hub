@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy, updateDoc, arrayUnion, arrayRemove, writeBatch, setDoc, getDoc } from 'firebase/firestore'; // Added getDoc and setDoc
+import { collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy, updateDoc, arrayUnion, arrayRemove, writeBatch, setDoc, getDoc } from 'firebase/firestore';
 import { auth, googleProvider, db } from './firebase';
 // All icons used, including new ones for MySpace, Skills, and Benefits page
-import { CheckCircle, Plus, Trash2, Calendar, User, LogOut, Home, Users, DollarSign, Settings, Bell, Lightbulb, Send, Globe, Lock, UserCheck, BookOpen, MessageSquare, Mic, XCircle, Palette, Music, Laugh, Feather, Heart, Award, UserSquare, GraduationCap, Clock } from 'lucide-react';
+// Added Sun, Cloud, CloudRain, Zap, Shield for Vibe Check
+// Added MessageCircleQuestion, Archive, Sparkles, HandHeart for Clarity Hub
+import { CheckCircle, Plus, Trash2, Calendar, User, LogOut, Home, Users, DollarSign, Settings, Bell, Lightbulb, Send, Globe, Lock, UserCheck, BookOpen, MessageSquare, Mic, XCircle, Palette, Music, Laugh, Feather, Heart, Award, UserSquare, GraduationCap, Clock, Sun, Cloud, CloudRain, Zap, Shield, MessageCircleQuestion, Archive, Sparkles, HandHeart } from 'lucide-react';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -11,18 +13,16 @@ function App() {
   const [tasks, setTasks] = useState([]);
   const [newTask, setNewTask] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [featureRequests, setFeatureRequests] = useState([]);
-  const [newFeatureRequest, setNewFeatureRequest] = useState({ title: '', description: '', priority: 'medium' });
 
   // Task related states
   const [newTaskCategory, setNewTaskCategory] = useState('');
   const [newTaskIsPrivate, setNewTaskIsPrivate] = useState(false);
-  // Re-evaluating familyMembers to fetch from Firestore users collection
-  const [householdMembers, setHouseholdMembers] = useState([]); // Renamed from familyMembers for clarity
+  const [householdMembers, setHouseholdMembers] = useState([]);
 
-  // Sync Session Ideas states
-  const [syncSessionIdeas, setSyncSessionIdeas] = useState([]);
-  const [newSyncSessionIdea, setNewSyncSessionIdea] = useState('');
+  // Clarity Hub states (combining/replacing featureRequests and syncSessionIdeas)
+  const [clarityMessages, setClarityMessages] = useState([]); // For active messages
+  const [resolvedAgreements, setResolvedAgreements] = useState([]); // For archived agreements
+  const [newClarityMessage, setNewClarityMessage] = useState({ title: '', observation: '', question: '', suggestedResolution: '' });
 
   // Quick add in header state
   const [quickAddTaskText, setQuickAddTaskText] = useState('');
@@ -37,17 +37,29 @@ function App() {
   const [newCreativeTitle, setNewCreativeTitle] = useState('');
   const [newCreativeType, setNewCreativeType] = useState('joke');
 
-  // New states for MySpace (User Profile)
+  // MySpace (User Profile) states
   const [myAvailabilityStatus, setMyAvailabilityStatus] = useState('Available for Tasks');
   const [mySpaceNotes, setMySpaceNotes] = useState('');
+  const [myCurrentVibe, setMyCurrentVibe] = useState(''); // User's self-selected vibe
 
-  // New states for Skill Hub
+  // Skill Hub states
   const [trainingRequests, setTrainingRequests] = useState([]);
   const [newTrainingSkill, setNewTrainingSkill] = useState('');
   const [newTrainingType, setNewTrainingType] = useState('Internal');
   const [newTrainingNotes, setNewTrainingNotes] = useState('');
-  const [currentSkills, setCurrentSkills] = useState([]); // For the current user's skills
+  const [currentSkills, setCurrentSkills] = useState([]);
 
+  // Pre-login vibe check state (already existing)
+  const [initialVibeSelected, setInitialVibeSelected] = useState(false);
+  const [currentPreLoginVibe, setCurrentPreLoginVibe] = useState('');
+
+  const vibeOptions = [
+    { label: "Sunny & Optimistic", value: "Sunny & Optimistic", icon: Sun, color: "text-yellow-500" },
+    { label: "Calm & Reflective", value: "Calm & Reflective", icon: Cloud, color: "text-blue-400" },
+    { label: "A Bit Stormy (Vulnerable)", value: "A Bit Stormy", icon: CloudRain, color: "text-indigo-500" },
+    { label: "Energized & Ready", value: "Energized & Ready", icon: Zap, color: "text-green-500" },
+    { label: "Feeling Vulnerable", value: "Feeling Vulnerable", icon: Shield, color: "text-gray-500" },
+  ];
 
   // Suggested Categories for household responsibilities (for initial fallback)
   const initialDefaultCategories = [
@@ -63,21 +75,34 @@ function App() {
       setUser(currentUser);
       setLoading(false);
       if (currentUser) {
-        // Ensure user profile exists in Firestore and initialize it
         const userRef = doc(db, 'users', currentUser.uid);
         const userSnap = await getDoc(userRef);
         if (!userSnap.exists()) {
-          // Initialize user profile with default MySpace info and empty skills
           await setDoc(userRef, {
             displayName: currentUser.displayName,
             email: currentUser.email,
             photoURL: currentUser.photoURL,
             availabilityStatus: 'Available for Tasks',
             mySpaceNotes: 'Ready to harmonize!',
+            currentVibe: currentPreLoginVibe || 'Unknown - Fresh to the Scene', // Set initial vibe from pre-login or default
             skills: [],
             createdAt: new Date()
           });
+          // If a new user, force them through the vibe selection screen
+          setInitialVibeSelected(false);
+        } else {
+          const userData = userSnap.data();
+          if (userData.currentVibe) {
+            setInitialVibeSelected(true);
+            setMyCurrentVibe(userData.currentVibe); // Load user's actual current vibe
+          } else {
+            // If user exists but no vibe set, force selection
+            setInitialVibeSelected(false);
+          }
         }
+      } else {
+        setInitialVibeSelected(false);
+        setMyCurrentVibe('');
       }
     });
     return () => unsubscribe();
@@ -87,42 +112,63 @@ function App() {
   useEffect(() => {
     if (user) {
       loadTasks();
-      loadFeatureRequests();
-      loadSyncSessionIdeas();
+      loadClarityMessages(); // Load both active and resolved clarity messages
       loadCategories();
       loadHarmonyCreatives();
-      loadHouseholdMembers(); // Load all household members
-      loadMySpaceInfo(); // Load current user's MySpace info
-      loadTrainingRequests(); // Load training requests
-      loadMySkills(); // Load current user's skills
+      loadHouseholdMembers();
+      loadMySpaceInfo();
+      loadTrainingRequests();
+      loadMySkills();
     } else {
       setTasks([]);
-      setFeatureRequests([]);
-      setSyncSessionIdeas([]);
-      setAvailableCategories([]); // Clear categories on logout
-      setHarmonyCreatives([]); // Clear creative content on logout
+      setClarityMessages([]);
+      setResolvedAgreements([]);
+      setAvailableCategories([]);
+      setHarmonyCreatives([]);
       setHouseholdMembers([]);
       setMyAvailabilityStatus('Available for Tasks');
       setMySpaceNotes('');
+      setMyCurrentVibe('');
       setTrainingRequests([]);
       setCurrentSkills([]);
     }
   }, [user]);
-const loadHouseholdMembers = async () => {
-  if (!user) return;
-  try {
-    console.log('Attempting to load household members for user:', user.uid); // Added log
-    const q = query(collection(db, 'users'), orderBy('displayName'));
-    const querySnapshot = await getDocs(q);
-    const members = [];
-    querySnapshot.forEach(d => members.push({ id: d.id, ...d.data() }));
-    setHouseholdMembers(members);
-    console.log('Household members loaded successfully:', members.length, 'members.'); // Added log
-  } catch (error) {
-    console.error('Detailed Error loading household members:', error.code, error.message, error); // Capture full error object
-    alert("Failed to load our awesome household members. Are they hiding from chores?"); // Keep existing alert
-  }
-};
+
+  // Handle vibe selection and update user profile
+  const handleVibeSelection = async (vibe) => {
+    setMyCurrentVibe(vibe); // Update the user's current vibe state
+    setCurrentPreLoginVibe(vibe); // For the pre-login screen's internal state
+    setInitialVibeSelected(true); // Mark vibe as selected
+    if (user) {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        await updateDoc(userRef, { currentVibe: vibe });
+        alert(`Your current vibe is: ${vibe}. Welcome to the Hub, co-creator of harmony!`);
+        await loadHouseholdMembers(); // Refresh household members to show updated vibe
+      } catch (error) {
+        console.error('Error updating user vibe:', error);
+        alert('Could not set your vibe. The universe is being uncooperative. Try again, brave soul.');
+      }
+    }
+  };
+
+  // --- Firestore Operations for Users/Profiles ---
+  const loadHouseholdMembers = async () => {
+    if (!user) return;
+    try {
+      console.log('Attempting to load household members for user:', user.uid);
+      const q = query(collection(db, 'users'), orderBy('displayName'));
+      const querySnapshot = await getDocs(q);
+      const members = [];
+      querySnapshot.forEach(d => members.push({ id: d.id, ...d.data() }));
+      setHouseholdMembers(members);
+      console.log('Household members loaded successfully:', members.length, 'members.');
+    } catch (error) {
+      console.error('Detailed Error loading household members:', error.code, error.message, error);
+      alert("Failed to load our awesome household members. Are they hiding from chores?");
+    }
+  };
+
   const loadMySpaceInfo = async () => {
     if (!user) return;
     try {
@@ -133,6 +179,7 @@ const loadHouseholdMembers = async () => {
         setMyAvailabilityStatus(data.availabilityStatus || 'Available for Tasks');
         setMySpaceNotes(data.mySpaceNotes || '');
         setCurrentSkills(data.skills || []);
+        setMyCurrentVibe(data.currentVibe || 'Unknown'); // Load user's current vibe
       }
     } catch (error) {
       console.error('Error loading MySpace info:', error);
@@ -141,17 +188,18 @@ const loadHouseholdMembers = async () => {
   };
 
   const updateMySpaceInfo = async (e) => {
-    e.preventDefault(); // Prevent page reload if this is part of a form
+    e.preventDefault();
     if (!user) return;
     try {
       const userDocRef = doc(db, 'users', user.uid);
       await updateDoc(userDocRef, {
         availabilityStatus: myAvailabilityStatus,
         mySpaceNotes: mySpaceNotes,
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        currentVibe: myCurrentVibe // Update currentVibe from MySpace form if changed there
       });
       alert("Your MySpace status has been updated! Now everyone knows if you're avoiding them... I mean, focusing on deep work.");
-      await loadHouseholdMembers(); // Refresh for others to see
+      await loadHouseholdMembers();
     } catch (error) {
       console.error('Error updating MySpace info:', error);
       alert("Failed to update your MySpace. Did you try shouting your status updates instead?");
@@ -179,7 +227,10 @@ const loadHouseholdMembers = async () => {
 
   const addCategory = async (e) => {
     e.preventDefault();
-    if (!newCategoryName.trim()) return;
+    if (!newCategoryName.trim()) {
+        alert("A category needs a name, even if it's 'Existential Dread.'");
+        return;
+    }
 
     const formattedCategory = newCategoryName.trim().charAt(0).toUpperCase() + newCategoryName.trim().slice(1).toLowerCase();
 
@@ -220,6 +271,11 @@ const loadHouseholdMembers = async () => {
 
   // Google Sign In
   const signInWithGoogle = async () => {
+    // Only allow sign in if a vibe has been selected on the pre-login screen
+    if (!currentPreLoginVibe && !user) {
+      alert("Please select your current vibe before signing in. We welcome all frequencies!");
+      return;
+    }
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
@@ -303,10 +359,10 @@ const loadHouseholdMembers = async () => {
       setNewTaskCategory('');
       setNewTaskIsPrivate(false);
       await loadTasks();
-      alert(`Task "${newTask}" added. Now, about that clarity... 😉`);
+      alert(`Task "${newTask}" added. Your intention is now rippling into the household energetic field. Keep tuning!`);
     } catch (error) {
       console.error('Error adding task:', error);
-      alert("Adding a task failed. Maybe the universe doesn't want you to have that much harmony just yet.");
+      alert("Manifesting failed for this task. Maybe your intention wave was intercepted by a rogue squirrel of doubt.");
     }
   };
 
@@ -332,7 +388,7 @@ const loadHouseholdMembers = async () => {
       });
       setQuickAddTaskText('');
       await loadTasks();
-      alert(`Quick task "${quickAddTaskText}" added. Another item for the grand ballet of domestic bliss!`);
+      alert(`Quick task "${quickAddTaskText}" manifested! Another item for the grand ballet of domestic bliss!`);
     } catch (error) {
       console.error('Error adding quick task:', error);
       alert("Failed to quickly add task. Is it a sign you should just go back to bed?");
@@ -363,7 +419,7 @@ const loadHouseholdMembers = async () => {
       });
       await loadTasks();
       if (!task.completed) {
-        alert(`Congratulations, ${user.displayName}! You've conquered "${task.text}"! A true hero of the harmonious home.`);
+        alert(`Congratulations, ${user.displayName}! You've manifested the completion of "${task.text}"! A true hero of the harmonious home.`);
       } else {
         alert(`"${task.text}" is back on the list. Did you miss it? Or just enjoy the thrill of re-doing things?`);
       }
@@ -383,7 +439,7 @@ const loadHouseholdMembers = async () => {
       });
       await loadTasks();
       if (assignedUserUid) {
-        alert(`Huzzah! "${assignedUserName}" has bravely volunteered for duty! Let the shared mental load commence!`);
+        alert(`Huzzah! "${assignedUserName}" has bravely attuned to this task's frequency! Let the shared mental load commence!`);
       } else {
         alert("Task unassigned. Who knew freedom could feel so... unburdened?");
       }
@@ -393,141 +449,92 @@ const loadHouseholdMembers = async () => {
     }
   };
 
-  // Load feature requests from Firestore
-  const loadFeatureRequests = async () => {
+  // --- Firestore Operations for Clarity Hub (Messages for Clarity & Resolved Agreements) ---
+  const clarityMessagesCollection = collection(db, 'clarityMessages'); // New collection for active messages
+  const resolvedAgreementsCollection = collection(db, 'resolvedAgreements'); // New collection for resolved messages
+
+  const loadClarityMessages = async () => {
     if (!user) return;
     try {
-      const q = query(
-        collection(db, 'featureRequests'),
-        where('userId', '==', user.uid),
-        orderBy('createdAt', 'desc')
-      );
-      const querySnapshot = await getDocs(q);
-      const loadedRequests = [];
-      querySnapshot.forEach((doc) => {
-        loadedRequests.push({ id: doc.id, ...doc.data() });
-      });
-      setFeatureRequests(loadedRequests);
+      const activeQ = query(clarityMessagesCollection, orderBy('createdAt', 'desc'));
+      const activeSnapshot = await getDocs(activeQ);
+      const loadedActive = activeSnapshot.map(d => ({ id: d.id, ...d.data() }));
+      setClarityMessages(loadedActive);
+
+      const resolvedQ = query(resolvedAgreementsCollection, orderBy('resolvedAt', 'desc'));
+      const resolvedSnapshot = await getDocs(resolvedQ);
+      const loadedResolved = resolvedSnapshot.map(d => ({ id: d.id, ...d.data() }));
+      setResolvedAgreements(loadedResolved);
+
     } catch (error) {
-      console.error('Error loading feature requests:', error);
-      alert("Failed to load bright ideas. Maybe they were too bright and blinded the database?");
+      console.error('Error loading clarity messages:', error);
+      alert("Failed to load clarity messages. Is everyone being perfectly clear, or just avoiding the hard conversations?");
     }
   };
 
-  // Add feature request to Firestore
-  const addFeatureRequest = async (e) => {
+  const addClarityMessage = async (e) => {
     e.preventDefault();
-    if (!newFeatureRequest.title.trim() || !newFeatureRequest.description.trim() || !user) {
-        alert("Please, don't leave me hanging. Give your brilliant idea a title and description, or it will forever be a mystery.");
-        return;
+    if (!newClarityMessage.title.trim() || !newClarityMessage.observation.trim() || !newClarityMessage.question.trim() || !user) {
+      alert("To truly manifest clarity, please provide a Title, Observation, and a clear Question.");
+      return;
     }
 
     try {
-      await addDoc(collection(db, 'featureRequests'), {
-        title: newFeatureRequest.title,
-        description: newFeatureRequest.description,
-        priority: newFeatureRequest.priority,
-        status: 'pending',
+      await addDoc(clarityMessagesCollection, {
+        title: newClarityMessage.title,
+        observation: newClarityMessage.observation,
+        question: newClarityMessage.question,
+        suggestedResolution: newClarityMessage.suggestedResolution.trim() || null,
         userId: user.uid,
-        userEmail: user.email,
         userName: user.displayName,
-        createdAt: new Date()
+        createdAt: new Date(),
+        status: 'Needs Discussion'
       });
-      setNewFeatureRequest({ title: '', description: '', priority: 'medium' });
-      await loadFeatureRequests();
-      alert("Your bright idea has been submitted! We'll get to it after we've solved world peace... or peeled those potatoes.");
+      setNewClarityMessage({ title: '', observation: '', question: '', suggestedResolution: '' });
+      await loadClarityMessages();
+      alert("Message for Clarity added! The path to shared understanding is now illuminated.");
     } catch (error) {
-      console.error('Error adding feature request:', error);
-      alert("Failed to send your brilliant idea. Did you try turning it off and on again?");
+      console.error('Error adding clarity message:', error);
+      alert("Failed to send forth your message for clarity. Perhaps the cosmic stage is too noisy right now.");
     }
   };
 
-  // Delete feature request from Firestore
-  const deleteFeatureRequest = async (requestId) => {
-    if (!window.confirm("Are you sure you want to retract this stroke of genius? What if it was *the one*?")) {
+  const resolveClarityMessage = async (message) => {
+    if (!window.confirm(`Are you sure this message for clarity is RESOLVED? It will be moved to the archive, never to be seen as an active issue again (unless we create a new one, of course).`)) {
       return;
     }
     try {
-      await deleteDoc(doc(db, 'featureRequests', requestId));
-      await loadFeatureRequests();
-      alert("Idea removed. Probably for the best. Some ideas are just *too* brilliant.");
-    } catch (error) {
-      console.error('Error deleting feature request:', error);
-      alert("Couldn't delete the idea. It's probably self-aware and resisting.");
-    }
-  };
-
-  // Load Sync Session Ideas from Firestore
-  const loadSyncSessionIdeas = async () => {
-    if (!user) return;
-    try {
-      const q = query(
-        collection(db, 'syncSessionIdeas'),
-        orderBy('createdAt', 'desc')
-      );
-      const querySnapshot = await getDocs(q);
-      const loadedIdeas = [];
-      querySnapshot.forEach((doc) => {
-        loadedIdeas.push({ id: doc.id, ...doc.data() });
+      // Add to resolvedAgreements collection
+      await addDoc(resolvedAgreementsCollection, {
+        originalTitle: message.title,
+        originalObservation: message.observation,
+        originalQuestion: message.question,
+        agreedResolution: "Resolution documented in comments/discussion (or not, if we agreed to disagree gracefully).", // Placeholder, ideally from user input
+        resolvedBy: user.uid,
+        resolvedByName: user.displayName,
+        resolvedAt: new Date()
       });
-      setSyncSessionIdeas(loadedIdeas);
+      // Delete from active clarityMessages
+      await deleteDoc(doc(clarityMessagesCollection, message.id));
+      await loadClarityMessages();
+      alert(`Message "${message.title}" resolved and archived. Another harmonious agreement achieved!`);
     } catch (error) {
-      console.error('Error loading sync session ideas:', error);
-      alert("Failed to load sync ideas. Maybe everyone's just too in sync to need more ideas?");
+      console.error('Error resolving clarity message:', error);
+      alert("Failed to resolve message. It seems some conflicts refuse to be harmonized.");
     }
   };
 
-  // Add Sync Session Idea to Firestore
-  const addSyncSessionIdea = async (e) => {
-    e.preventDefault();
-    if (!newSyncSessionIdea.trim() || !user) {
-        alert("Even brilliant minds need to type something. What's on your mind?");
-        return;
+  const deleteClarityMessage = async (messageId, messageTitle) => {
+    if (!window.confirm(`Are you sure you want to delete "${messageTitle}"? This will vanish without a trace.`)) {
+      return;
     }
     try {
-      await addDoc(collection(db, 'syncSessionIdeas'), {
-        text: newSyncSessionIdea,
-        userId: user.uid,
-        userName: user.displayName,
-        createdAt: new Date()
-      });
-      setNewSyncSessionIdea('');
-      await loadSyncSessionIdeas();
-      alert(`Sync idea added! Another nugget of conversational gold for our next 'get-in-sync' hang out.`);
+      await deleteDoc(doc(clarityMessagesCollection, messageId));
+      await loadClarityMessages();
+      alert(`Message "${messageTitle}" vanished. Poof!`);
     } catch (error) {
-      console.error('Error adding sync session idea:', error);
-      alert("Failed to add sync idea. Perhaps the cosmos deems this discussion unworthy. (Or Firebase is acting up).");
-    }
-  };
-
-  // Delete single Sync Session Idea from Firestore
-  const deleteSyncSessionIdea = async (ideaId) => {
-    try {
-      await deleteDoc(doc(db, 'syncSessionIdeas', ideaId));
-      await loadSyncSessionIdeas();
-      alert("Idea gracefully removed. Just like that time we 'decided' to ignore a task by deleting it.");
-    } catch (error) {
-      console.error('Error deleting sync session idea:', error);
-      alert("This idea is stubbornly refusing to leave. Must be a really important topic.");
-    }
-  };
-
-  // Clear all Sync Session Ideas (e.g., after a meeting)
-  const clearAllSyncSessionIdeas = async () => {
-    if (window.confirm("Are you sure you want to clear all sync session ideas? This cannot be undone, much like that embarrassing story from last holiday.")) {
-      try {
-        const querySnapshot = await getDocs(collection(db, 'syncSessionIdeas'));
-        const batch = writeBatch(db);
-        querySnapshot.forEach((document) => {
-          batch.delete(document.ref);
-        });
-        await batch.commit();
-        await loadSyncSessionIdeas();
-        alert("All sync ideas cleared! Now, what *were* we talking about?");
-      } catch (error) {
-        console.error('Error clearing all sync session ideas:', error);
-        alert("Clearing ideas failed. They're probably too attached to us.");
-      }
+      console.error('Error deleting clarity message:', error);
+      alert("Couldn't delete message. It's clinging to existence like that last bit of stubborn grime.");
     }
   };
 
@@ -730,31 +737,71 @@ const loadHouseholdMembers = async () => {
     );
   }
 
-  // Login screen
-  if (!user) {
+  // Pre-login Vibe Check Screen
+  if (!user || !initialVibeSelected) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="max-w-md w-full mx-4">
-          <div className="bg-white rounded-xl shadow-lg p-8 text-center">
-            <Home className="mx-auto h-12 w-12 text-indigo-600 mb-4" />
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Home Harmony Hub</h1>
-            <p className="text-gray-600 mb-8">Organize your family life with ease (and a dash of shared sarcasm!)</p>
-            <button
-              onClick={signInWithGoogle}
-              className="w-full bg-white border border-gray-300 rounded-lg px-6 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors flex items-center justify-center gap-3"
-            >
-              <img 
-                src="https://developers.google.com/identity/images/g-logo.png" 
-                alt="Google" 
-                className="w-5 h-5"
-              />
-              Sign in with Google (Don't worry, we won't tell anyone about the potato incident.)
-            </button>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center">
+          <Heart className="mx-auto h-12 w-12 text-pink-600 mb-4 animate-pulse" />
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome to Your Harmony Hub!</h1>
+          <p className="text-gray-600 mb-6">
+            Before we dive into the symphony of tasks, how are you tuning in today? Your vibe is welcome here. We're all wonderfully vulnerable human beings, and our shared strength comes from meeting each other where we are.
+          </p>
+          <div className="space-y-3 mb-6">
+            {vibeOptions.map((vibe) => (
+              <button
+                key={vibe.value}
+                onClick={() => handleVibeSelection(vibe.value)}
+                className={`w-full flex items-center justify-center gap-3 px-6 py-3 rounded-lg border transition-all duration-300
+                  ${myCurrentVibe === vibe.value ? 'bg-indigo-100 border-indigo-500 text-indigo-700 font-semibold shadow-md' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}
+                `}
+              >
+                <vibe.icon className={`h-5 w-5 ${vibe.color}`} />
+                {vibe.label}
+              </button>
+            ))}
           </div>
+          <p className="text-gray-500 text-sm italic mb-6">
+            (Don't worry, you can change this anytime in your MySpace profile.)
+          </p>
+          <button
+            onClick={signInWithGoogle}
+            disabled={!myCurrentVibe} // Disable login until vibe is selected
+            className={`w-full rounded-lg px-6 py-3 text-white font-medium transition-colors flex items-center justify-center gap-3
+              ${myCurrentVibe ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'}
+            `}
+          >
+            <img 
+              src="https://developers.google.com/identity/images/g-logo.png" 
+              alt="Google" 
+              className="w-5 h-5"
+            />
+            Sign in with Google (and bring your chosen vibe!)
+          </button>
         </div>
       </div>
     );
   }
+
+  // Helper to determine collective vibe for dashboard
+  const getCollectiveVibe = () => {
+    const totalMembers = householdMembers.length;
+    if (totalMembers === 0) return { label: "Quiet Echo", color: "text-gray-400" };
+
+    const availableCount = householdMembers.filter(m => m.availabilityStatus === 'Available for Tasks').length;
+    const stormyCount = householdMembers.filter(m => m.currentVibe === 'A Bit Stormy' || m.currentVibe === 'Feeling Vulnerable').length;
+
+    if (stormyCount > totalMembers / 2) {
+      return { label: "A Bit Stormy", color: "text-red-500", desc: "Our collective frequency is a bit jagged. Time for compassionate listening." };
+    } else if (availableCount > totalMembers / 2) {
+      return { label: "Harmonious Flow", color: "text-green-500", desc: "Our collective frequency is high! Let's amplify the good vibes." };
+    } else {
+      return { label: "Steady Hum", color: "text-orange-500", desc: "Our collective frequency is steady. Ready for some fine-tuning!" };
+    }
+  };
+
+  const collectiveVibe = getCollectiveVibe();
+
 
   // Main app content
   const renderContent = () => {
@@ -798,21 +845,33 @@ const loadHouseholdMembers = async () => {
               </div>
             </div>
 
+            {/* Collective Vibe Meter */}
+            <div className="bg-white rounded-xl shadow-sm p-6 text-center">
+                <h2 className="text-lg font-semibold text-gray-900 mb-2">Our Collective Vibe!</h2>
+                <div className="flex items-center justify-center gap-4">
+                  <Sun className={`h-10 w-10 ${collectiveVibe.color} animate-pulse`} />
+                  <div>
+                    <p className={`text-3xl font-bold ${collectiveVibe.color}`}>{collectiveVibe.label}</p>
+                    <p className="text-sm text-gray-600">{collectiveVibe.desc}</p>
+                  </div>
+                </div>
+            </div>
+
             <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Add a New Harmony Task</h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Manifest a New Harmony Task (Tune Your Intention!)</h2>
               <form onSubmit={addTask} className="space-y-4">
                 <div>
                   <input
                     type="text"
                     value={newTask}
                     onChange={(e) => setNewTask(e.target.value)}
-                    placeholder="What harmony needs to be created? (Be specific, unlike that time with the 'clean the kitchen' task.)"
+                    placeholder="What desired outcome are we manifesting today? (Be specific, unlike that time with the 'clean the kitchen' task.)"
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-full"
                   />
                 </div>
                 
                 <div className="flex items-center gap-4">
-                  <label htmlFor="task-category" className="text-sm text-gray-700">Category:</label>
+                  <label htmlFor="task-category" className="text-sm text-gray-700">Category (Choose a vibe):</label>
                   <select
                     id="task-category"
                     value={newTaskCategory}
@@ -835,7 +894,7 @@ const loadHouseholdMembers = async () => {
                     className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
                   />
                   <label htmlFor="private-task" className="text-sm text-gray-700">
-                    Keep this one just for me (because some harmony is a solo act).
+                    Keep this intention private (because some harmony is a solo act).
                   </label>
                 </div>
 
@@ -843,20 +902,20 @@ const loadHouseholdMembers = async () => {
                   type="submit"
                   className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
                 >
-                  <Plus className="h-4 w-4" />
-                  Add Harmony Task (May the odds be ever in your favor!)
+                  <Sparkles className="h-4 w-4" />
+                  Manifest Harmony Task (May your intention wave resonate!)
                 </button>
               </form>
 
               {/* Add New Category Section */}
               <div className="mt-6 pt-6 border-t border-gray-200">
-                <h3 className="text-md font-semibold text-gray-900 mb-3">Add a New Category (Because 'Miscellaneous' is so last season.)</h3>
+                <h3 className="text-md font-semibold text-gray-900 mb-3">Add a New Category (Because 'Miscellaneous' is so last season, and our labels need to evolve with our vibrations.)</h3>
                 <form onSubmit={addCategory} className="flex gap-3">
                   <input
                     type="text"
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
-                    placeholder="e.g., 'Existential Dread' or 'Snack Procurement'"
+                    placeholder="e.g., 'Existential Dread' or 'Snack Procurement Manifesting'"
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     required
                   />
@@ -869,7 +928,7 @@ const loadHouseholdMembers = async () => {
                   </button>
                 </form>
                  <div className="mt-4">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Our Curated Category Collection (Handle with care, they're delicate):</h4>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Our Curated Category Collection (Handle with care, they're delicate and energetically charged):</h4>
                     <div className="flex flex-wrap gap-2">
                         {availableCategories.map(category => (
                             <span key={category} className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800">
@@ -877,7 +936,7 @@ const loadHouseholdMembers = async () => {
                                 <button
                                     onClick={() => removeCategory(category)}
                                     className="ml-2 -mr-0.5 h-4 w-4 text-gray-500 hover:text-red-600 transition-colors"
-                                    title={`Banish "${category}"`}
+                                    title={`Banish "${category}" (adjust the collective wavelength).`}
                                 >
                                     <XCircle />
                                 </button>
@@ -889,7 +948,7 @@ const loadHouseholdMembers = async () => {
             </div>
 
             <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Harmony Tasks (Behold, our efforts!)</h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Harmony Tasks (Behold, our manifested efforts!)</h2>
               <div className="space-y-3">
                 {tasks.slice(0, 5).map((task) => (
                   <div key={task.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
@@ -900,15 +959,15 @@ const loadHouseholdMembers = async () => {
                       <span className={task.completed ? 'line-through text-gray-500' : 'text-gray-900'}>
                         {task.text}
                         {task.category && <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">{task.category}</span>}
-                        {task.isPrivate ? <Lock className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Private Task: Don't Touch My Precious!" /> : <Globe className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Shared Task: For All to Behold (and do)." />}
-                        {task.assignedToName && <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full flex items-center gap-1"><UserCheck className="h-3 w-3" /> Assigned to: {task.assignedToName} (Good luck, champ!)</span>}
+                        {task.isPrivate ? <Lock className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Private Intention: Don't Touch My Precious!" /> : <Globe className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Shared Intention: For All to Behold (and do)." />}
+                        {task.assignedToName && <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full flex items-center gap-1"><UserCheck className="h-3 w-3" /> Attuned to: {task.assignedToName} (Good luck, champ!)</span>}
                       </span>
                     </div>
-                    {task.userId === user.uid && ( // Only the creator can delete
+                    {task.userId === user.uid && (
                       <button
                         onClick={() => deleteTask(task.id)}
                         className="text-red-500 hover:text-red-700 transition-colors ml-2"
-                        title="Delete this task (if you dare)."
+                        title="Vanish this task forever. Muhahaha!"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -916,7 +975,7 @@ const loadHouseholdMembers = async () => {
                   </div>
                 ))}
                 {tasks.length === 0 && (
-                  <p className="text-gray-500 text-center py-8">No harmony tasks yet. The universe is surprisingly quiet. Let's add some chaos... I mean, harmony!</p>
+                  <p className="text-gray-500 text-center py-8">No harmony tasks yet. The universe is surprisingly quiet. Let's manifest some chaos... I mean, harmony!</p>
                 )}
               </div>
             </div>
@@ -926,19 +985,19 @@ const loadHouseholdMembers = async () => {
       case 'tasks':
         return (
           <div className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">All Harmony Tasks (A Symphony of To-Dos!)</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">All Harmony Tasks (A Symphony of Manifested To-Dos!)</h2>
             <div className="space-y-3">
               {tasks.map((task) => (
                 <div key={task.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div className="flex items-center gap-3 flex-1">
-                    <button onClick={() => toggleTaskCompletion(task)} className="focus:outline-none" title="Mark as Done/Undone (The eternal struggle!)">
+                    <button onClick={() => toggleTaskCompletion(task)} className="focus:outline-none" title="Mark as Manifested/Unmanifested (The eternal struggle!)">
                       <CheckCircle className={`h-5 w-5 ${task.completed ? 'text-green-500' : 'text-gray-400'}`} />
                     </button>
                     <span className={task.completed ? 'line-through text-gray-500' : 'text-gray-900'}>
                       {task.text}
                       {task.category && <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">{task.category}</span>}
-                      {task.isPrivate ? <Lock className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Private Task: My Secret Burden" /> : <Globe className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Shared Task: Your Burden Now!" />}
-                      {task.assignedToName && <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full flex items-center gap-1"><UserCheck className="h-3 w-3" /> Assigned to: {task.assignedToName}</span>}
+                      {task.isPrivate ? <Lock className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Private Intention: My Secret Burden" /> : <Globe className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Shared Intention: Your Burden Now!" />}
+                      {task.assignedToName && <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full flex items-center gap-1"><UserCheck className="h-3 w-3" /> Attuned to: {task.assignedToName}</span>}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -946,16 +1005,16 @@ const loadHouseholdMembers = async () => {
                        <button
                          onClick={() => assignTask(task.id, user.uid, user.displayName)}
                          className="px-3 py-1 bg-green-500 text-white rounded-md text-sm hover:bg-green-600 transition-colors"
-                         title="Volunteer for glory (or chores)."
+                         title="Volunteer to resonate with this task's frequency!"
                        >
-                         Assign to Me! (Be brave!)
+                         Attune to Me! (Be brave!)
                        </button>
                     )}
                     {task.assignedTo === user.uid && ( // Only current assignee can unassign
                       <button
                         onClick={() => assignTask(task.id, null, null)}
                         className="px-3 py-1 bg-yellow-500 text-white rounded-md text-sm hover:bg-yellow-600 transition-colors"
-                        title="Abandon ship! (Just kidding, re-open for grabs)."
+                        title="Release this wave! (Just kidding, re-open for grabs)."
                       >
                         Unassign Me (Freedom!)
                       </button>
@@ -973,13 +1032,13 @@ const loadHouseholdMembers = async () => {
                 </div>
               ))}
               {tasks.length === 0 && (
-                <p className="text-gray-500 text-center py-8">No harmony tasks yet. The house is either sparkling or we're all in denial. Probably the latter. Add one from the dashboard!</p>
+                <p className="text-gray-500 text-center py-8">No harmony tasks yet. The house is either sparkling or we're all in denial. Probably the latter. Manifest one from the dashboard!</p>
               )}
             </div>
           </div>
         );
 
-      case 'family': // This will now be the "MySpace" area for household members
+      case 'family': // "Our Awesome Household!" as "MySpace"
         return (
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Our Awesome Household! (The Pillars of Harmony & Occasional Chaos!)</h2>
@@ -988,12 +1047,12 @@ const loadHouseholdMembers = async () => {
             {/* MySpace Section for Current User */}
             <div className="mb-8 p-6 bg-indigo-50 rounded-lg shadow-sm border border-indigo-100">
                 <h3 className="text-xl font-bold text-indigo-800 mb-4 flex items-center gap-2">
-                    <UserSquare className="h-6 w-6"/> Your Personal MySpace (Keep it real, folks!)
+                    <UserSquare className="h-6 w-6"/> Your Personal MySpace (Keep it real, folks, and share your true frequency!)
                 </h3>
                 <form onSubmit={updateMySpaceInfo} className="space-y-4">
                     <div>
                         <label htmlFor="availability-status" className="block text-sm font-medium text-gray-700 mb-2">
-                            My Current Vibe/Availability:
+                            My Current Availability:
                         </label>
                         <select
                             id="availability-status"
@@ -1009,14 +1068,29 @@ const loadHouseholdMembers = async () => {
                         </select>
                     </div>
                     <div>
+                        <label htmlFor="my-current-vibe" className="block text-sm font-medium text-gray-700 mb-2">
+                            My Energetic Signature / Current Vibe:
+                        </label>
+                        <select
+                            id="my-current-vibe"
+                            value={myCurrentVibe}
+                            onChange={(e) => setMyCurrentVibe(e.target.value)}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                            {vibeOptions.map(vibe => (
+                                <option key={vibe.value} value={vibe.value}>{vibe.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
                         <label htmlFor="myspace-notes" className="block text-sm font-medium text-gray-700 mb-2">
-                            My Inner Monologue / Important Notes for the Household:
+                            My Inner Monologue / Important Notes for the Household (Share your vulnerability!):
                         </label>
                         <textarea
                             id="myspace-notes"
                             value={mySpaceNotes}
                             onChange={(e) => setMySpaceNotes(e.target.value)}
-                            placeholder="Feeling reflective today. Or, 'Just finished the laundry, praise me!'"
+                            placeholder="Feeling reflective today. Or, 'Just finished the laundry, praise me!' (Embrace 'not knowing' here too!)"
                             rows={3}
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                         />
@@ -1026,7 +1100,7 @@ const loadHouseholdMembers = async () => {
                         className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
                     >
                         <Send className="h-4 w-4" />
-                        Update MySpace
+                        Update MySpace & Vibe
                     </button>
                 </form>
             </div>
@@ -1044,6 +1118,9 @@ const loadHouseholdMembers = async () => {
                         {member.id === user.uid && <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">That's You!</span>}
                         <p className="text-sm text-gray-500">
                           Status: <span className="font-semibold">{member.availabilityStatus || 'Status Unknown (Probably plotting something)'}</span>
+                        </p>
+                         <p className="text-sm text-gray-500">
+                          Current Vibe: <span className="font-semibold">{member.currentVibe || 'Unspecified Resonance'}</span>
                         </p>
                       </div>
                     </div>
@@ -1149,6 +1226,46 @@ const loadHouseholdMembers = async () => {
                 And that, my dear co-harmonizers, is the not-so-secret secret sauce behind the Home Harmony Hub. It's designed to give us structure where we need it, flexibility where we crave it, and security where it truly matters. Now, back to those tasks... unless you have a new joke to share?
               </p>
             </div>
+            {/* New section for philosophical underpinnings from the document */}
+            <div className="mt-8 pt-8 border-t border-gray-200">
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Our Guiding Philosophy: Riding the Waves of Harmony!</h3>
+                <p className="text-gray-700 mb-4">
+                    The Harmony Hub isn't just about tasks; it's about **cultivating a living ecosystem of peace, love, and understanding.** Think of our shared life as a grand symphony of waves, and each of us is a unique instrument, adding our own frequency and amplitude to the collective.
+                </p>
+                <h4 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                    <Sun className="h-5 w-5 text-yellow-500" /> "Vibes" as a Wave's Signature:
+                </h4>
+                <ul className="list-disc list-inside text-gray-700 space-y-2 mb-4">
+                    <li>**Good Vibes:** A harmonious frequency, an expansive amplitude – feeling uplifting and resonant.</li>
+                    <li>**Bad Vibes:** A discordant frequency, a constricted amplitude – feeling off or tense.</li>
+                    <li>The Hub aims to help us achieve **constructive interference**, where our individual waves align to amplify the positive collective vibe!</li>
+                </ul>
+                <h4 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-indigo-500" /> "Manifesting" as Influencing the Wave:
+                </h4>
+                <ul className="list-disc list-inside text-gray-700 space-y-2 mb-4">
+                    <li>When you add a task, you're **intentionally influencing your personal wave**, tuning it to a specific frequency and amplitude that aligns with your desired outcome (e.g., a clean kitchen!).</li>
+                    <li>It's about **focusing your energy** (amplitude) and **aligning your intentions** (frequency) with what you want to bring into reality.</li>
+                </ul>
+                <h4 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                    <HandHeart className="h-5 w-5 text-pink-500" /> "Attunement": Harmonizing with the Universal Wave:
+                </h4>
+                <ul className="list-disc list-inside text-gray-700 space-y-2 mb-4">
+                    <li>**Attunement is Resonance:** Coming into harmony with a deeper reality or desired state. It's about finding your unique note and playing it in sync with the overall composition of our home.</li>
+                    <li>In relationships, being "on the same wavelength" literally means our personal waves are in sync, amplifying shared understanding. This Hub helps us achieve that!</li>
+                </ul>
+                <h4 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5 text-green-500" /> Reframing Conflict: From Punishment to Process:
+                </h4>
+                <ul className="list-disc list-inside text-gray-700 space-y-2 mb-4">
+                    <li>Conflict isn't about blame, but an opportunity for **deeper understanding**. The Hub's Clarity Messages help us depersonalize issues by focusing on the "message for clarity" itself.</li>
+                    <li>**Vulnerability is Strength:** Embracing "not knowing" and openly sharing our inner landscape builds trust and resilience, transforming challenges into opportunities for growth.</li>
+                    <li>**Holding Feelings:** Instead of "fixing" difficult emotions, we learn to "hold" them with curiosity. This validates experiences and allows emotions to dissipate naturally, preventing resentment.</li>
+                </ul>
+                <p className="text-gray-700 mt-6">
+                    By consciously engaging with these principles, we move beyond just managing tasks to actively **co-creating a home where peace, love, and harmonious vibrations are the default.** Welcome to the performance!
+                </p>
+            </div>
           </div>
         );
 
@@ -1211,64 +1328,159 @@ const loadHouseholdMembers = async () => {
           </div>
         );
 
-      case 'sync-session-ideas':
+      case 'clarity-hub': // New: The Clarity Hub (replaces Sync Sessions & Feature Requests conceptually)
         return (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Ideas for Our Next Get-In-Sync Hangout! (Because adulting needs bullet points.)</h2>
-            <p className="text-gray-600 mb-4">
-              Jot down anything that comes to mind for us to chat about during our next family sync-up. That brilliant thought you had while doing the laundry? The minor annoyance from breakfast? The profound philosophical question about why we still have that one broken chair? No pressure, just a shared notepad for topics that require *actual* human interaction, not just task completion.
-            </p>
-            <form onSubmit={addSyncSessionIdea} className="flex gap-3 mb-6">
-              <input
-                type="text"
-                value={newSyncSessionIdea}
-                onChange={(e) => setNewSyncSessionIdea(e.target.value)}
-                placeholder="Got an idea for our next riveting chat? Spill it!"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              />
-              <button
-                type="submit"
-                className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                Add Brainwave!
-              </button>
-            </form>
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">The Clarity Hub: Navigating Waves of Understanding (No Blame, Just Process!)</h2>
+              <p className="text-gray-600 mb-4">
+                This is where we bring any subtle discord or unclear frequencies into the light. Remember, there's no blame, only opportunities for deeper understanding and collective growth. Frame your message as an observation and a question, seeking clarity to fine-tune our shared harmony.
+              </p>
+              
+              <h3 className="text-md font-semibold text-gray-900 mb-3">Add a New Message for Clarity (Tune into Shared Understanding!)</h3>
+              <form onSubmit={addClarityMessage} className="space-y-4">
+                <div>
+                  <label htmlFor="clarity-title" className="block text-sm font-medium text-gray-700 mb-2">
+                    Message Title (Short & Factual, like a calm weather report):
+                  </label>
+                  <input
+                    id="clarity-title"
+                    type="text"
+                    value={newClarityMessage.title}
+                    onChange={(e) => setNewClarityMessage({...newClarityMessage, title: e.target.value})}
+                    placeholder="e.g., 'Dishwasher Contents Query' or 'Mysterious Light Switch Situation'"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="clarity-observation" className="block text-sm font-medium text-gray-700 mb-2">
+                    Observation / Context (What happened or what's unclear? No blame, just facts!):
+                  </label>
+                  <textarea
+                    id="clarity-observation"
+                    value={newClarityMessage.observation}
+                    onChange={(e) => setNewClarityMessage({...newClarityMessage, observation: e.target.value})}
+                    placeholder="Describe the situation or observation without assigning blame (e.g., 'The dishwasher was run, but items are still visibly un-clean.')"
+                    rows={3}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    required
+                  />
+                </div>
 
-            <div className="space-y-3">
-              {syncSessionIdeas.length > 0 ? (
-                syncSessionIdeas.map((idea) => (
-                  <div key={idea.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <span className="text-gray-900 flex-1">
-                      {idea.text}
-                      <span className="text-xs text-gray-500 ml-2"> (added by {idea.userName} on {new Date(idea.createdAt.toDate()).toLocaleDateString()}, probably just after finding another rogue sock)</span>
-                    </span>
-                    <button
-                      onClick={() => deleteSyncSessionIdea(idea.id)}
-                      className="text-red-500 hover:text-red-700 transition-colors ml-4"
-                      title="Make this idea vanish like that last piece of cake."
-                    >
-                      <XCircle className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <p className="text-gray-500 text-center py-8">No ideas yet. Our collective minds are either perfectly aligned, or we're all too busy staring blankly at the ceiling. Add something that pops into your head (before it pops out!).</p>
-              )}
+                <div>
+                  <label htmlFor="clarity-question" className="block text-sm font-medium text-gray-700 mb-2">
+                    Question / Need for Clarity (How can we collectively attune to this?):
+                  </label>
+                  <textarea
+                    id="clarity-question"
+                    value={newClarityMessage.question}
+                    onChange={(e) => setNewClarityMessage({...newClarityMessage, question: e.target.value})}
+                    placeholder="Frame this as a question or a need for shared understanding/decision (e.g., 'What process can we use to ensure items are clean before a cycle?')"
+                    rows={3}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="clarity-resolution" className="block text-sm font-medium text-gray-700 mb-2">
+                    Suggested Resolution (Optional: Share your initial wavelength for a solution):
+                  </label>
+                  <textarea
+                    id="clarity-resolution"
+                    value={newClarityMessage.suggestedResolution}
+                    onChange={(e) => setNewClarityMessage({...newClarityMessage, suggestedResolution: e.target.value})}
+                    placeholder="Optional: Propose a way forward, if you have a clear frequency in mind."
+                    rows={2}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+                
+                <button
+                  type="submit"
+                  className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <MessageCircleQuestion className="h-4 w-4" />
+                  Send Message for Clarity!
+                </button>
+              </form>
             </div>
 
-            {syncSessionIdeas.length > 0 && (
-              <div className="mt-6 text-center">
-                <button
-                  onClick={clearAllSyncSessionIdeas}
-                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center justify-center gap-2 mx-auto"
-                  title="Prepare for a fresh start! Or, you know, just tidy up the ideas."
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Clear All Ideas (After Our Epic Sync-Up!)
-                </button>
+            {/* Active Messages for Clarity List */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Active Messages for Clarity (Waves Still Rippling... Let's Attune!)</h2>
+              <div className="space-y-4">
+                {clarityMessages.length > 0 ? (
+                  clarityMessages.map((message) => (
+                    <div key={message.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                      <h3 className="font-medium text-gray-900 mb-1 flex items-center gap-2">
+                        <MessageCircleQuestion className="h-5 w-5 text-indigo-500" />
+                        {message.title}
+                      </h3>
+                      <p className="text-gray-600 text-sm mb-2">**Observation:** {message.observation}</p>
+                      <p className="text-gray-600 text-sm mb-2">**Question:** {message.question}</p>
+                      {message.suggestedResolution && <p className="text-gray-600 text-sm mb-2">**Suggested:** {message.suggestedResolution}</p>}
+                      <p className="text-xs text-gray-500 mt-2">
+                        Added by {message.userName} on {new Date(message.createdAt.toDate()).toLocaleDateString()}
+                      </p>
+                      <div className="flex justify-end gap-2 mt-3">
+                          {message.userId === user.uid && ( // Only the creator can delete
+                            <button
+                              onClick={() => deleteClarityMessage(message.id, message.title)}
+                              className="text-red-500 hover:text-red-700 transition-colors"
+                              title="Delete this message (if the universe has already clarified)."
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => resolveClarityMessage(message)}
+                            className="px-3 py-1 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 transition-colors flex items-center gap-2"
+                            title="Mark as resolved and archive (for future reference and harmony!)."
+                          >
+                            <CheckCircle className="h-4 w-4" /> Resolve
+                          </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-gray-500 text-center py-8">No active messages for clarity. Our wavelengths must be perfectly aligned today!</p>
+                )}
               </div>
-            )}
+            </div>
+
+            {/* Resolved Agreements & Baselines Archive */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Resolved Agreements & Baselines (Our Codex of Collective Harmony!)</h2>
+              <p className="text-gray-600 mb-4">
+                This archive holds the wisdom gained from past attunement sessions. It's our living "rulebook" of agreed-upon processes and understandings, ensuring future ripples are harmonious, not chaotic.
+              </p>
+              <div className="space-y-4">
+                {resolvedAgreements.length > 0 ? (
+                  resolvedAgreements.map((agreement) => (
+                    <div key={agreement.id} className="border border-gray-200 rounded-lg p-4 bg-blue-50">
+                      <h3 className="font-medium text-gray-900 mb-1 flex items-center gap-2">
+                        <Archive className="h-5 w-5 text-blue-500" />
+                        Resolved: {agreement.originalTitle}
+                      </h3>
+                      <p className="text-gray-700 text-sm mb-2">
+                        **Original Question:** {agreement.originalQuestion}
+                      </p>
+                      <p className="text-gray-700 text-sm mb-2">
+                        **Agreed Resolution:** {agreement.agreedResolution}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Resolved by {agreement.resolvedByName} on {new Date(agreement.resolvedAt.toDate()).toLocaleDateString()}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-gray-500 text-center py-8">No resolved agreements yet. Let's start resolving some clarity messages!</p>
+                )}
+              </div>
+            </div>
           </div>
         );
       
@@ -1444,7 +1656,7 @@ const loadHouseholdMembers = async () => {
 
             {/* All Training Requests */}
             <div className="bg-white rounded-xl shadow-sm p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Outstanding Training Missions:</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Outstanding Training Missions (Waves of Learning!)</h3>
               <div className="space-y-3">
                 {trainingRequests.length > 0 ? (
                   trainingRequests.map((request) => (
@@ -1474,9 +1686,9 @@ const loadHouseholdMembers = async () => {
 
             {/* My Skills Section */}
             <div className="bg-white rounded-xl shadow-sm p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">My Personal Skill Tree:</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">My Personal Skill Tree (Amplify Your Resonance!):</h3>
                 <p className="text-gray-600 mb-4">
-                    List your skills here, from 'Novice' to 'Grand Master'! Because knowing what you're good at (or want to be good at) is part of self-awareness.
+                    List your skills here, from 'Novice' to 'Grand Master'! Because knowing what you're good at (or want to be good at) is part of self-awareness. Each new skill amplifies your contribution to the collective harmony.
                 </p>
                 <form onSubmit={(e) => { e.preventDefault(); addMySkill(e.target.skillNameInput.value); e.target.skillNameInput.value = ''; }} className="flex gap-3 mb-6">
                     <input
@@ -1529,113 +1741,16 @@ const loadHouseholdMembers = async () => {
           </div>
         );
 
-      case 'feature-requests':
-        return (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Bright Ideas & Wishes for the Hub! (Because even perfect things can be... more perfect.)</h2>
-              <p className="text-gray-600 mb-4">Got a brilliant idea to make our Home Harmony Hub even better? Perhaps a button that automatically makes coffee? Let us know!</p>
-              <form onSubmit={addFeatureRequest} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Idea Title (Keep it snappy, like a good punchline!)
-                  </label>
-                  <input
-                    type="text"
-                    value={newFeatureRequest.title}
-                    onChange={(e) => setNewFeatureRequest({...newFeatureRequest, title: e.target.value})}
-                    placeholder="A quick summary of your awesome idea"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Tell us more! (Don't leave out the juicy details!)
-                  </label>
-                  <textarea
-                    value={newFeatureRequest.description}
-                    onChange={(e) => setNewFeatureRequest({...newFeatureRequest, description: e.target.value})}
-                    placeholder="Describe your idea in more detail... imagine explaining it to a very confused squirrel."
-                    rows={4}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    How important is this idea? (On a scale from 'meh' to 'world-changing harmony!')
-                  </label>
-                  <select
-                    value={newFeatureRequest.priority}
-                    onChange={(e) => setNewFeatureRequest({...newFeatureRequest, priority: e.target.value})}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  >
-                    <option value="low">Low (It can wait for the apocalypse.)</option>
-                    <option value="medium">Medium (Worth considering after tea.)</option>
-                    <option value="high">High (URGENT! Our very harmony depends on it!)</option>
-                  </select>
-                </div>
-                
-                <button
-                  type="submit"
-                  className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Send className="h-4 w-4" />
-                  Send Your Bright Idea! (And cross your fingers.)
-                </button>
-              </form>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Your Brilliant Ideas Submitted (Prepare for awe!)</h2>
-              <div className="space-y-4">
-                {featureRequests.map((request) => (
-                  <div key={request.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="font-medium text-gray-900">{request.title}</h3>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            request.priority === 'high' ? 'bg-red-100 text-red-800' :
-                            request.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-green-100 text-green-800'
-                          }`}>
-                            {request.priority}
-                          </span>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            request.status === 'pending' ? 'bg-gray-100 text-gray-800' :
-                            request.status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
-                            'bg-green-100 text-green-800'
-                          }`}>
-                            {request.status}
-                          </span>
-                        </div>
-                        <p className="text-gray-600 text-sm mb-2">{request.description}</p>
-                        <p className="text-xs text-gray-500">
-                          Submitted {new Date(request.createdAt.toDate()).toLocaleDateString()} (by {request.userName})
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => deleteFeatureRequest(request.id)}
-                        className="text-red-500 hover:text-red-700 transition-colors ml-4"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {featureRequests.length === 0 && (
-                  <p className="text-gray-500 text-center py-8">
-                    No bright ideas yet. Our developers are weeping from boredom. Send us one above!
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        );
+      // Removed 'feature-requests' and 'sync-session-ideas' as separate cases, now covered by 'clarity-hub'
+      // The old content will not be rendered directly. You can uncomment to retain old if needed.
+      // case 'feature-requests':
+      //   return (
+      //     ... (old feature requests content) ...
+      //   );
+      // case 'sync-session-ideas':
+      //   return (
+      //     ... (old sync session ideas content) ...
+      //   );
 
       default:
         return (
@@ -1654,7 +1769,7 @@ const loadHouseholdMembers = async () => {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-3">
               <Home className="h-8 w-8 text-indigo-600" />
-              <span className="text-xl font-bold text-gray-900">Home Harmony Hub (Now with more sarcasm!)</span>
+              <span className="text-xl font-bold text-gray-900">Home Harmony Hub (Now with more sarcasm and resonant vibes!)</span>
             </div>
             
             <div className="flex items-center gap-4">
@@ -1663,11 +1778,11 @@ const loadHouseholdMembers = async () => {
                   <input
                     type="text"
                     value={quickAddTaskText}
-                    onChange={(e) => setQuickAddTaskText(e.target.value)}
+                    onChange={(e) => setNewTaskText(e.target.value)}
                     placeholder="Quick task? (Before it escapes!)"
                     className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 w-40"
                   />
-                  <button type="submit" className="text-gray-500 hover:text-indigo-600 transition-colors" title="Add quick task (before you forget why you walked into this room).">
+                  <button type="submit" className="text-gray-500 hover:text-indigo-600 transition-colors" title="Manifest quick task (before you forget why you walked into this room).">
                     <Plus className="h-5 w-5" />
                   </button>
                   {/* Placeholder for Mic Input - will be implemented later */}
@@ -1711,13 +1826,14 @@ const loadHouseholdMembers = async () => {
                 {[
                   { id: 'dashboard', label: 'Our Harmony Dashboard', icon: Home },
                   { id: 'tasks', label: 'All Harmony Tasks', icon: CheckCircle },
-                  { id: 'sync-session-ideas', label: 'Sync Session Ideas', icon: MessageSquare },
+                  { id: 'clarity-hub', label: 'The Clarity Hub', icon: MessageCircleQuestion }, // New Clarity Hub Tab
                   { id: 'harmony-gallery', label: 'Harmony Gallery & Bard Booth', icon: Heart },
                   { id: 'our-harmony-guide', label: 'Our Harmony Guide', icon: BookOpen },
-                  { id: 'path-to-good-vibes', label: 'The Path to Good Vibes', icon: Award }, // New Name for Benefits
-                  { id: 'family', label: 'Our Awesome Household', icon: Users }, // This is now the MySpace/Member View
-                  { id: 'skill-hub', label: 'The Skill Hub', icon: GraduationCap }, // New Skill Hub Tab
-                  { id: 'feature-requests', label: 'Bright Ideas & Wishes', icon: Lightbulb },
+                  { id: 'path-to-good-vibes', label: 'The Path to Good Vibes', icon: Award },
+                  { id: 'family', label: 'Our Awesome Household', icon: Users },
+                  { id: 'skill-hub', label: 'The Skill Hub', icon: GraduationCap },
+                  // { id: 'feature-requests', label: 'Bright Ideas & Wishes', icon: Lightbulb }, // Removed
+                  // { id: 'sync-session-ideas', label: 'Sync Session Ideas', icon: MessageSquare }, // Removed
                   { id: 'budget', label: 'Budget', icon: DollarSign },
                   { id: 'settings', label: 'Settings', icon: Settings }
                 ].map(({ id, label, icon: Icon }) => (
