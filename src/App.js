@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy, updateDoc } from 'firebase/firestore'; // Import updateDoc
 import { auth, googleProvider, db } from './firebase';
-import { CheckCircle, Plus, Trash2, Calendar, User, LogOut, Home, Users, DollarSign, Settings, Bell, Lightbulb, Send, Globe, Lock, UserCheck } from 'lucide-react';
+import { CheckCircle, Plus, Trash2, Calendar, User, LogOut, Home, Users, DollarSign, Settings, Bell, Lightbulb, Send, Globe, Lock, UserCheck } from 'lucide-react'; // Added Globe, Lock, UserCheck icons
 
 function App() {
   const [user, setUser] = useState(null);
@@ -20,20 +20,17 @@ function App() {
 
 
   // Suggested Categories for household responsibilities
-const taskCategories = [
+  const taskCategories = [
     'General',
     'Cleaning',
-    'Cooking & Meal Prep',
-    'Shopping & Errands',
-    'Yard Work & Outdoor',
+    'Cooking',
+    'Shopping',
+    'Yard Work',
     'Pet Care',
-    'Home Maintenance & Repairs',
-    'Bills & Finances',
-    'Appointments & Planning',
-    'Vehicle Maintenance',
-    'Tech & Gadgets',
-    'Donations & Decluttering',
-    'Health & Wellness'
+    'Maintenance',
+    'Kids',
+    'Finances',
+    'Appointments',
   ];
 
   // Authentication state listener
@@ -322,7 +319,7 @@ const taskCategories = [
 
             <div className="bg-white rounded-xl shadow-sm p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Add Task</h2>
-              <form onSubmit={addTask} className="space-y-4">
+              <form onSubmit={addTask} className="space-y-4"> {/* Changed to space-y-4 for vertical layout */}
                 <div>
                   <input
                     type="text"
@@ -387,14 +384,12 @@ const taskCategories = [
                         {task.assignedToName && <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full flex items-center gap-1"><UserCheck className="h-3 w-3" />{task.assignedToName}</span>}
                       </span>
                     </div>
-                    {task.userId === user.uid && ( // Only the creator can delete
-                      <button
-                        onClick={() => deleteTask(task.id)}
-                        className="text-red-500 hover:text-red-700 transition-colors ml-2"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => deleteTask(task.id)}
+                      className="text-red-500 hover:text-red-700 transition-colors ml-2"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 ))}
                 {tasks.length === 0 && (
@@ -424,7 +419,7 @@ const taskCategories = [
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {!task.assignedTo && !task.isPrivate && ( // Can only assign shared tasks
+                    {!task.assignedTo && (
                        <button
                          onClick={() => assignTask(task.id, user.uid, user.displayName)}
                          className="px-3 py-1 bg-green-500 text-white rounded-md text-sm hover:bg-green-600 transition-colors"
@@ -432,7 +427,7 @@ const taskCategories = [
                          Assign to Me
                        </button>
                     )}
-                    {task.assignedTo === user.uid && ( // Only current assignee can unassign
+                    {task.assignedTo === user.uid && (
                       <button
                         onClick={() => assignTask(task.id, null, null)}
                         className="px-3 py-1 bg-yellow-500 text-white rounded-md text-sm hover:bg-yellow-600 transition-colors"
@@ -637,7 +632,7 @@ const taskCategories = [
                 {[
                   { id: 'dashboard', label: 'Dashboard', icon: Home },
                   { id: 'tasks', label: 'Tasks', icon: CheckCircle },
-                  { id: 'family', label: 'Family', icon: Users },
+                  { id: 'family', label: 'Family', icon: Users }, // Moved Family up
                   { id: 'feature-requests', label: 'Feature Requests', icon: Lightbulb },
                   { id: 'budget', label: 'Budget', icon: DollarSign },
                   { id: 'settings', label: 'Settings', icon: Settings }
