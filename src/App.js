@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore';
 import { auth, googleProvider, db } from './firebase';
-import { CheckCircle, Plus, Trash2, Calendar, User, LogOut, Home, Users, DollarSign, Settings, Bell } from 'lucide-react';
+import { CheckCircle, Plus, Trash2, Calendar, User, LogOut, Home, Users, DollarSign, Settings, Bell, Lightbulb, Send } from 'lucide-react';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -10,6 +10,8 @@ function App() {
   const [tasks, setTasks] = useState([]);
   const [newTask, setNewTask] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [featureRequests, setFeatureRequests] = useState([]);
+  const [newFeatureRequest, setNewFeatureRequest] = useState({ title: '', description: '', priority: 'medium' });
 
   // Authentication state listener
   useEffect(() => {
@@ -24,8 +26,10 @@ function App() {
   useEffect(() => {
     if (user) {
       loadTasks();
+      loadFeatureRequests();
     } else {
       setTasks([]);
+      setFeatureRequests([]);
     }
   }, [user]);
 
@@ -94,6 +98,60 @@ function App() {
       await loadTasks(); // Reload tasks
     } catch (error) {
       console.error('Error deleting task:', error);
+    }
+  };
+
+  // Load feature requests from Firestore
+  const loadFeatureRequests = async () => {
+    if (!user) return;
+    
+    try {
+      const q = query(
+        collection(db, 'featureRequests'),
+        where('userId', '==', user.uid),
+        orderBy('createdAt', 'desc')
+      );
+      const querySnapshot = await getDocs(q);
+      const loadedRequests = [];
+      querySnapshot.forEach((doc) => {
+        loadedRequests.push({ id: doc.id, ...doc.data() });
+      });
+      setFeatureRequests(loadedRequests);
+    } catch (error) {
+      console.error('Error loading feature requests:', error);
+    }
+  };
+
+  // Add feature request to Firestore
+  const addFeatureRequest = async (e) => {
+    e.preventDefault();
+    if (!newFeatureRequest.title.trim() || !newFeatureRequest.description.trim() || !user) return;
+
+    try {
+      await addDoc(collection(db, 'featureRequests'), {
+        title: newFeatureRequest.title,
+        description: newFeatureRequest.description,
+        priority: newFeatureRequest.priority,
+        status: 'pending',
+        userId: user.uid,
+        userEmail: user.email,
+        userName: user.displayName,
+        createdAt: new Date()
+      });
+      setNewFeatureRequest({ title: '', description: '', priority: 'medium' });
+      await loadFeatureRequests(); // Reload requests
+    } catch (error) {
+      console.error('Error adding feature request:', error);
+    }
+  };
+
+  // Delete feature request from Firestore
+  const deleteFeatureRequest = async (requestId) => {
+    try {
+      await deleteDoc(doc(db, 'featureRequests', requestId));
+      await loadFeatureRequests(); // Reload requests
+    } catch (error) {
+      console.error('Error deleting feature request:', error);
     }
   };
 
@@ -252,6 +310,113 @@ function App() {
           </div>
         );
 
+      case 'feature-requests':
+        return (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Request New Feature</h2>
+              <form onSubmit={addFeatureRequest} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Feature Title
+                  </label>
+                  <input
+                    type="text"
+                    value={newFeatureRequest.title}
+                    onChange={(e) => setNewFeatureRequest({...newFeatureRequest, title: e.target.value})}
+                    placeholder="Brief title for your feature request"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Description
+                  </label>
+                  <textarea
+                    value={newFeatureRequest.description}
+                    onChange={(e) => setNewFeatureRequest({...newFeatureRequest, description: e.target.value})}
+                    placeholder="Describe the feature you'd like to see added..."
+                    rows={4}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Priority
+                  </label>
+                  <select
+                    value={newFeatureRequest.priority}
+                    onChange={(e) => setNewFeatureRequest({...newFeatureRequest, priority: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+                
+                <button
+                  type="submit"
+                  className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Send className="h-4 w-4" />
+                  Submit Feature Request
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Your Feature Requests</h2>
+              <div className="space-y-4">
+                {featureRequests.map((request) => (
+                  <div key={request.id} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="font-medium text-gray-900">{request.title}</h3>
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            request.priority === 'high' ? 'bg-red-100 text-red-800' :
+                            request.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-green-100 text-green-800'
+                          }`}>
+                            {request.priority}
+                          </span>
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            request.status === 'pending' ? 'bg-gray-100 text-gray-800' :
+                            request.status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
+                            'bg-green-100 text-green-800'
+                          }`}>
+                            {request.status}
+                          </span>
+                        </div>
+                        <p className="text-gray-600 text-sm mb-2">{request.description}</p>
+                        <p className="text-xs text-gray-500">
+                          Submitted {new Date(request.createdAt.toDate()).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => deleteFeatureRequest(request.id)}
+                        className="text-red-500 hover:text-red-700 transition-colors ml-4"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {featureRequests.length === 0 && (
+                  <p className="text-gray-500 text-center py-8">
+                    No feature requests yet. Submit one above!
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+
       default:
         return (
           <div className="bg-white rounded-xl shadow-sm p-6">
@@ -300,6 +465,7 @@ function App() {
                 {[
                   { id: 'dashboard', label: 'Dashboard', icon: Home },
                   { id: 'tasks', label: 'Tasks', icon: CheckCircle },
+                  { id: 'feature-requests', label: 'Feature Requests', icon: Lightbulb },
                   { id: 'family', label: 'Family', icon: Users },
                   { id: 'budget', label: 'Budget', icon: DollarSign },
                   { id: 'settings', label: 'Settings', icon: Settings }
