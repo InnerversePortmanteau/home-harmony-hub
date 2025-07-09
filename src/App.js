@@ -108,22 +108,21 @@ function App() {
       setCurrentSkills([]);
     }
   }, [user]);
-
-  // --- Firestore Operations for Users/Profiles ---
-  const loadHouseholdMembers = async () => {
-    if (!user) return;
-    try {
-      const q = query(collection(db, 'users'), orderBy('displayName'));
-      const querySnapshot = await getDocs(q);
-      const members = [];
-      querySnapshot.forEach(d => members.push({ id: d.id, ...d.data() }));
-      setHouseholdMembers(members);
-    } catch (error) {
-      console.error('Error loading household members:', error);
-      alert("Failed to load our awesome household members. Are they hiding from chores?");
-    }
-  };
-
+const loadHouseholdMembers = async () => {
+  if (!user) return;
+  try {
+    console.log('Attempting to load household members for user:', user.uid); // Added log
+    const q = query(collection(db, 'users'), orderBy('displayName'));
+    const querySnapshot = await getDocs(q);
+    const members = [];
+    querySnapshot.forEach(d => members.push({ id: d.id, ...d.data() }));
+    setHouseholdMembers(members);
+    console.log('Household members loaded successfully:', members.length, 'members.'); // Added log
+  } catch (error) {
+    console.error('Detailed Error loading household members:', error.code, error.message, error); // Capture full error object
+    alert("Failed to load our awesome household members. Are they hiding from chores?"); // Keep existing alert
+  }
+};
   const loadMySpaceInfo = async () => {
     if (!user) return;
     try {
