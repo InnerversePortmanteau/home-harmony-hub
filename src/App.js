@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy, updateDoc, arrayUnion, arrayRemove, writeBatch, setDoc, getDoc } from 'firebase/firestore';
 import { auth, googleProvider, db } from './firebase';
 // All icons used, including new ones for MySpace, Skills, and Benefits page
 // Added Sun, Cloud, CloudRain, Zap, Shield for Vibe Check
 // Added MessageCircleQuestion, Archive, Sparkles, HandHeart for Clarity Hub
-import { CheckCircle, Plus, Trash2, Calendar, User, LogOut, Home, Users, DollarSign, Settings, Bell, Lightbulb, Send, Globe, Lock, UserCheck, BookOpen, MessageSquare, Mic, XCircle, Palette, Music, Laugh, Feather, Heart, Award, UserSquare, GraduationCap, Clock, Sun, Cloud, CloudRain, Zap, Shield, MessageCircleQuestion, Archive, Sparkles, HandHeart } from 'lucide-react';
+// Added icons for expression studio
+import { CheckCircle, Plus, Trash2, Calendar, User, LogOut, Home, Users, DollarSign, Settings, Bell, Lightbulb, Send, Globe, Lock, UserCheck, BookOpen, MessageSquare, Mic, XCircle, Palette, Music, Laugh, Feather, Heart, Award, UserSquare, GraduationCap, Clock, Sun, Cloud, CloudRain, Zap, Shield, MessageCircleQuestion, Archive, Sparkles, HandHeart, Edit, Image, PenTool } from 'lucide-react';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -31,7 +32,7 @@ function App() {
   const [availableCategories, setAvailableCategories] = useState([]);
   const [newCategoryName, setNewCategoryName] = useState('');
 
-  // States for Harmony Gallery & Bard Booth
+  // States for Harmony Gallery & Bard Booth (now also holds user-created expressions)
   const [harmonyCreatives, setHarmonyCreatives] = useState([]);
   const [newCreativeContent, setNewCreativeContent] = useState('');
   const [newCreativeTitle, setNewCreativeTitle] = useState('');
@@ -49,10 +50,26 @@ function App() {
   const [newTrainingNotes, setNewTrainingNotes] = useState('');
   const [currentSkills, setCurrentSkills] = useState([]);
 
-  // Pre-login vibe check state (already existing)
+  // Pre-login vibe check state
   const [initialVibeSelected, setInitialVibeSelected] = useState(false);
-  const [currentPreLoginVibe, setCurrentPreLoginVibe] = useState('');
+  const [currentPreLoginVibe, setCurrentPreLoginVibe] = useState(''); // Holds temp vibe until user doc is ready
 
+  // Harmony Narrative Booth/Emotional Story Weaver states
+  const [showNarrativeBoothModal, setShowNarrativeBoothModal] = useState(false);
+  const [selectedNarrativeEmotions, setSelectedNarrativeEmotions] = useState([]);
+  const [matchedNarrative, setMatchedNarrative] = useState(null);
+  const [narrativeFeedback, setNarrativeFeedback] = useState(null); // 'spot-on', 'close', 'nope'
+
+  // Personal Expression Studio states
+  const [showExpressionStudioModal, setShowExpressionStudioModal] = useState(false);
+  const [newExpressionType, setNewExpressionType] = useState('poem'); // poem, song-lyrics, comic-book
+  const [newExpressionIsPrivate, setNewExpressionIsPrivate] = useState(false);
+  const [comicPanels, setComicPanels] = useState([{ imageUrl: '', caption: '' }]); // For comic book creation
+
+  // Resonance Broadcast state (for Dashboard display)
+  const [vulnerabilityBroadcasts, setVulnerabilityBroadcasts] = useState([]);
+
+  // --- Core Data Arrays (can be moved to Firestore later for full dynamic control) ---
   const vibeOptions = [
     { label: "Sunny & Optimistic", value: "Sunny & Optimistic", icon: Sun, color: "text-yellow-500" },
     { label: "Calm & Reflective", value: "Calm & Reflective", icon: Cloud, color: "text-blue-400" },
@@ -61,7 +78,6 @@ function App() {
     { label: "Feeling Vulnerable", value: "Feeling Vulnerable", icon: Shield, color: "text-gray-500" },
   ];
 
-  // Suggested Categories for household responsibilities (for initial fallback)
   const initialDefaultCategories = [
     'General', 'Cleaning', 'Cooking & Meal Prep', 'Shopping & Errands',
     'Yard Work & Outdoor', 'Pet Care', 'Home Maintenance & Repairs',
@@ -69,7 +85,91 @@ function App() {
     'Tech & Gadgets', 'Donations & Decluttering', 'Health & Wellness'
   ];
 
-  // Authentication state listener
+  // Brené Brown's 87 Emotions & Experiences (from Atlas of the Heart)
+  const humanEmotionsAtlas = [
+    {
+      category: "PLACES WE GO WHEN Things Are Uncertain Or Too Much",
+      emotions: [
+        "Stress", "Overwhelm", "Anxiety", "Worry", "Vulnerability"
+      ]
+    },
+    {
+      category: "PLACES WE GO WHEN We Compare",
+      emotions: [
+        "Comparison", "Admiration", "Reverence", "Envy", "Jealousy"
+      ]
+    },
+    {
+      category: "PLACES WE GO WHEN Things Don't Go As Planned",
+      emotions: [
+        "Boredom", "Disappointment", "Expectations", "Discouragement",
+        "Regret", "Avoidance", "Resentment", "Frustration", "Dread", "Fear", "Resignation"
+      ]
+    },
+    {
+      category: "PLACES WE GO WHEN It's Beyond Us",
+      emotions: [
+        "Awe", "Wonder", "Confusion", "Curiosity", "Interest", "Surprise"
+      ]
+    },
+    {
+      category: "PLACES WE GO WHEN Things Aren't What They Seem",
+      emotions: [
+        "Amusement", "Bittersweetness", "Nostalgia", "Cognitive Dissonance",
+        "Paradox", "Irony", "Sarcasm", "Excitement", "Schadenfreude", "Freudenfreude"
+      ]
+    },
+    {
+      category: "PLACES WE GO WHEN We're Hurting",
+      emotions: [
+        "Anguish", "Hopelessness", "Despair", "Sadness", "Grief", "Hurt"
+      ]
+    },
+    {
+      category: "PLACES WE GO With Others",
+      emotions: [
+        "Compassion", "Pity", "Empathy", "Sympathy", "Boundaries", "Comparative Suffering"
+      ]
+    },
+    {
+      category: "PLACES WE GO WHEN We Fall Short",
+      emotions: [
+        "Shame", "Self-Compassion", "Perfectionism", "Guilt", "Humiliation", "Embarrassment"
+      ]
+    },
+    {
+      category: "PLACES WE GO WHEN We Search for Connection",
+      emotions: [
+        "Belonging", "Fitting In", "Connection", "Disconnection", "Insecurity", "Invisibility", "Loneliness"
+      ]
+    },
+    {
+      category: "PLACES WE GO WHEN The Heart Is Open",
+      emotions: [
+        "Love", "Lovelessness", "Heartbreak", "Trust", "Self-Trust", "Betrayal", "Defensiveness", "Flooding"
+      ]
+    },
+    {
+      category: "PLACES WE GO WHEN Life Is Good",
+      emotions: [
+        "Joy", "Happiness", "Calm", "Contentment", "Gratitude", "Foreboding Joy", "Relief", "Tranquility"
+      ]
+    },
+    {
+      category: "PLACES WE GO WHEN We Feel Wronged",
+      emotions: [
+        "Anger", "Contempt", "Disgust", "Dehumanization", "Hate", "Self-Righteousness"
+      ]
+    },
+    {
+      category: "PLACES WE GO To Self-Assess",
+      emotions: [
+        "Pride", "Hubris", "Humility"
+      ]
+    }
+  ];
+
+  // --- Auth State Listener ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
@@ -84,23 +184,24 @@ function App() {
             photoURL: currentUser.photoURL,
             availabilityStatus: 'Available for Tasks',
             mySpaceNotes: 'Ready to harmonize!',
-            currentVibe: currentPreLoginVibe || 'Unknown - Fresh to the Scene', // Set initial vibe from pre-login or default
+            currentVibe: currentPreLoginVibe || 'Unknown - Fresh to the Scene',
             skills: [],
             createdAt: new Date()
           });
-          // If a new user, force them through the vibe selection screen
+          // New user, force vibe selection
           setInitialVibeSelected(false);
         } else {
           const userData = userSnap.data();
           if (userData.currentVibe) {
             setInitialVibeSelected(true);
-            setMyCurrentVibe(userData.currentVibe); // Load user's actual current vibe
+            setMyCurrentVibe(userData.currentVibe);
           } else {
-            // If user exists but no vibe set, force selection
+            // Existing user but no vibe set yet, force selection
             setInitialVibeSelected(false);
           }
         }
       } else {
+        // User logs out
         setInitialVibeSelected(false);
         setMyCurrentVibe('');
       }
@@ -108,17 +209,18 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  // Load data when user changes
+  // --- Data Loading on User Change ---
   useEffect(() => {
     if (user) {
       loadTasks();
-      loadClarityMessages(); // Load both active and resolved clarity messages
+      loadClarityMessages();
       loadCategories();
       loadHarmonyCreatives();
       loadHouseholdMembers();
       loadMySpaceInfo();
       loadTrainingRequests();
       loadMySkills();
+      loadVulnerabilityBroadcasts(); // Load broadcasts on login
     } else {
       setTasks([]);
       setClarityMessages([]);
@@ -131,20 +233,21 @@ function App() {
       setMyCurrentVibe('');
       setTrainingRequests([]);
       setCurrentSkills([]);
+      setVulnerabilityBroadcasts([]); // Clear broadcasts on logout
     }
   }, [user]);
 
-  // Handle vibe selection and update user profile
+  // --- General Vibe Selection (Pre-login / MySpace) ---
   const handleVibeSelection = async (vibe) => {
-    setMyCurrentVibe(vibe); // Update the user's current vibe state
-    setCurrentPreLoginVibe(vibe); // For the pre-login screen's internal state
-    setInitialVibeSelected(true); // Mark vibe as selected
+    setMyCurrentVibe(vibe);
+    setCurrentPreLoginVibe(vibe); // This is needed for the pre-login UI
+    setInitialVibeSelected(true);
     if (user) {
       try {
         const userRef = doc(db, 'users', user.uid);
         await updateDoc(userRef, { currentVibe: vibe });
         alert(`Your current vibe is: ${vibe}. Welcome to the Hub, co-creator of harmony!`);
-        await loadHouseholdMembers(); // Refresh household members to show updated vibe
+        await loadHouseholdMembers();
       } catch (error) {
         console.error('Error updating user vibe:', error);
         alert('Could not set your vibe. The universe is being uncooperative. Try again, brave soul.');
@@ -156,13 +259,11 @@ function App() {
   const loadHouseholdMembers = async () => {
     if (!user) return;
     try {
-      console.log('Attempting to load household members for user:', user.uid);
       const q = query(collection(db, 'users'), orderBy('displayName'));
       const querySnapshot = await getDocs(q);
       const members = [];
       querySnapshot.forEach(d => members.push({ id: d.id, ...d.data() }));
       setHouseholdMembers(members);
-      console.log('Household members loaded successfully:', members.length, 'members.');
     } catch (error) {
       console.error('Detailed Error loading household members:', error.code, error.message, error);
       alert("Failed to load our awesome household members. Are they hiding from chores?");
@@ -179,7 +280,7 @@ function App() {
         setMyAvailabilityStatus(data.availabilityStatus || 'Available for Tasks');
         setMySpaceNotes(data.mySpaceNotes || '');
         setCurrentSkills(data.skills || []);
-        setMyCurrentVibe(data.currentVibe || 'Unknown'); // Load user's current vibe
+        setMyCurrentVibe(data.currentVibe || 'Unknown');
       }
     } catch (error) {
       console.error('Error loading MySpace info:', error);
@@ -196,7 +297,7 @@ function App() {
         availabilityStatus: myAvailabilityStatus,
         mySpaceNotes: mySpaceNotes,
         updatedAt: new Date(),
-        currentVibe: myCurrentVibe // Update currentVibe from MySpace form if changed there
+        currentVibe: myCurrentVibe
       });
       alert("Your MySpace status has been updated! Now everyone knows if you're avoiding them... I mean, focusing on deep work.");
       await loadHouseholdMembers();
@@ -269,10 +370,9 @@ function App() {
     }
   };
 
-  // Google Sign In
+  // --- Auth Actions ---
   const signInWithGoogle = async () => {
-    // Only allow sign in if a vibe has been selected on the pre-login screen
-    if (!currentPreLoginVibe && !user) {
+    if (!myCurrentVibe && !user) { // Use myCurrentVibe from state, not pre-login temp
       alert("Please select your current vibe before signing in. We welcome all frequencies!");
       return;
     }
@@ -284,7 +384,6 @@ function App() {
     }
   };
 
-  // Sign Out
   const handleSignOut = async () => {
     try {
       await signOut(auth);
@@ -294,7 +393,7 @@ function App() {
     }
   };
 
-  // Load tasks from Firestore
+  // --- Task Operations ---
   const loadTasks = async () => {
     if (!user) return;
     
@@ -335,7 +434,6 @@ function App() {
     }
   };
 
-  // Add task to Firestore
   const addTask = async (e) => {
     e.preventDefault();
     if (!newTask.trim() || !user) {
@@ -366,7 +464,6 @@ function App() {
     }
   };
 
-  // Handle quick add task from header
   const handleQuickAddTask = async (e) => {
     e.preventDefault();
     if (!quickAddTaskText.trim() || !user) {
@@ -395,7 +492,6 @@ function App() {
     }
   };
 
-  // Delete task from Firestore
   const deleteTask = async (taskId) => {
     if (!window.confirm("Are you *sure* you want to delete this task? Think of the ripple effect on household harmony!")) {
       return;
@@ -410,7 +506,6 @@ function App() {
     }
   };
 
-  // Toggle task completion
   const toggleTaskCompletion = async (task) => {
     try {
       const taskRef = doc(db, 'tasks', task.id);
@@ -429,7 +524,6 @@ function App() {
     }
   };
 
-  // Assign task to a user
   const assignTask = async (taskId, assignedUserUid, assignedUserName) => {
     try {
       const taskRef = doc(db, 'tasks', taskId);
@@ -449,9 +543,9 @@ function App() {
     }
   };
 
-  // --- Firestore Operations for Clarity Hub (Messages for Clarity & Resolved Agreements) ---
-  const clarityMessagesCollection = collection(db, 'clarityMessages'); // New collection for active messages
-  const resolvedAgreementsCollection = collection(db, 'resolvedAgreements'); // New collection for resolved messages
+  // --- Clarity Hub Operations (combining previous Feature Requests and Sync Session Ideas) ---
+  const clarityMessagesCollection = collection(db, 'clarityMessages');
+  const resolvedAgreementsCollection = collection(db, 'resolvedAgreements');
 
   const loadClarityMessages = async () => {
     if (!user) return;
@@ -504,17 +598,15 @@ function App() {
       return;
     }
     try {
-      // Add to resolvedAgreements collection
       await addDoc(resolvedAgreementsCollection, {
         originalTitle: message.title,
         originalObservation: message.observation,
         originalQuestion: message.question,
-        agreedResolution: "Resolution documented in comments/discussion (or not, if we agreed to disagree gracefully).", // Placeholder, ideally from user input
+        agreedResolution: "Resolution documented in comments/discussion (or not, if we agreed to disagree gracefully).",
         resolvedBy: user.uid,
         resolvedByName: user.displayName,
         resolvedAt: new Date()
       });
-      // Delete from active clarityMessages
       await deleteDoc(doc(clarityMessagesCollection, message.id));
       await loadClarityMessages();
       alert(`Message "${message.title}" resolved and archived. Another harmonious agreement achieved!`);
@@ -538,25 +630,32 @@ function App() {
     }
   };
 
-  // --- Firestore Operations for Harmony Creatives ---
+  // --- Harmony Creatives Operations (now includes user-created expressions) ---
   const loadHarmonyCreatives = async () => {
     if (!user) return;
     try {
-      const q = query(
-        collection(db, 'harmonyCreatives'),
-        orderBy('createdAt', 'desc')
-      );
-      const querySnapshot = await getDocs(q);
-      const loadedCreatives = [];
-      querySnapshot.forEach((doc) => {
-        loadedCreatives.push({ id: doc.id, ...doc.data() });
-      });
-      setHarmonyCreatives(loadedCreatives);
+      // Fetch both public and private (user's own) expressions
+      const qShared = query(collection(db, 'harmonyCreatives'), where('privacy', '==', 'shared'), orderBy('createdAt', 'desc'));
+      const qPrivateUser = query(collection(db, 'harmonyCreatives'), where('privacy', '==', 'private'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
+
+      const [sharedSnapshot, privateUserSnapshot] = await Promise.all([
+          getDocs(qShared),
+          getDocs(qPrivateUser)
+      ]);
+      
+      const loadedCreativesMap = new Map();
+      sharedSnapshot.forEach(doc => loadedCreativesMap.set(doc.id, { id: doc.id, ...doc.data() }));
+      privateUserSnapshot.forEach(doc => loadedCreativesMap.set(doc.id, { id: doc.id, ...doc.data() }));
+
+      const allLoadedCreatives = Array.from(loadedCreativesMap.values()).sort((a,b) => b.createdAt - a.createdAt);
+      setHarmonyCreatives(allLoadedCreatives);
+
     } catch (error) {
       console.error('Error loading creative content:', error);
       alert("Failed to load the masterpieces. Perhaps the muses are on coffee break?");
     }
   };
+
 
   const addHarmonyCreative = async (e) => {
     e.preventDefault();
@@ -572,13 +671,18 @@ function App() {
         content: newCreativeContent,
         userId: user.uid,
         userName: user.displayName,
-        createdAt: new Date()
+        createdAt: new Date(),
+        privacy: newExpressionIsPrivate ? 'private' : 'shared', // New privacy field
+        comicPanels: newExpressionType === 'comic-book' ? comicPanels : null, // Store comic panel data
       });
       setNewCreativeContent('');
       setNewCreativeTitle('');
       setNewCreativeType('joke'); // Reset to default
+      setNewExpressionIsPrivate(false);
+      setComicPanels([{ imageUrl: '', caption: '' }]); // Reset comic panels
       await loadHarmonyCreatives();
       alert(`Your ${newCreativeType} has been added to the Harmony Gallery! Prepare for applause... or polite silence.`);
+      setShowExpressionStudioModal(false); // Close modal after submission
     } catch (error) {
       console.error('Error adding creative content:', error);
       alert("The artistic inspiration failed to upload. The internet must be judging your abstract expressionism.");
@@ -599,7 +703,7 @@ function App() {
     }
   };
 
-  // --- Firestore Operations for Skill Hub ---
+  // --- Skill Hub Operations ---
   const loadTrainingRequests = async () => {
     if (!user) return;
     try {
@@ -674,7 +778,6 @@ function App() {
       return;
     }
 
-    // Prevent duplicates
     if (currentSkills.some(s => s.name.toLowerCase() === skillName.toLowerCase())) {
         alert("You already know this skill! Don't be greedy, master of multiple talents!");
         return;
@@ -725,7 +828,181 @@ function App() {
     }
   };
 
-  // Loading screen
+  // --- Harmony Narrative Booth / Emotional Story Weaver Functions ---
+  const openNarrativeBooth = () => {
+    setShowNarrativeBoothModal(true);
+    setSelectedNarrativeEmotions([]);
+    setMatchedNarrative(null);
+    setNarrativeFeedback(null);
+  };
+
+  const closeNarrativeBooth = () => {
+    setShowNarrativeBoothModal(false);
+    setSelectedNarrativeEmotions([]);
+    setMatchedNarrative(null);
+    setNarrativeFeedback(null);
+  };
+
+  const handleEmotionSelection = (emotion) => {
+    setSelectedNarrativeEmotions(prev => 
+      prev.includes(emotion) 
+        ? prev.filter(e => e !== emotion) 
+        : [...prev, emotion]
+    );
+  };
+
+  // Dummy function to find a narrative based on selected emotions
+  const findMatchingNarrative = () => {
+    if (selectedNarrativeEmotions.length === 0) return null;
+
+    // --- BASIC PLACEHOLDER LOGIC ---
+    // In a real app, you'd have a Firestore collection of narratives
+    // and query based on emotionTags. For now, very simple hardcoded matches.
+    const sampleNarratives = [
+      {
+        id: 'n1',
+        title: "The Great Unseen Load: A Micro-Task Avalanche",
+        text: "You woke up feeling like a single dust bunny was actually an army of unwritten tasks. The sheer mental weight of 'check mail,' 'relocate rogue pen,' and 'consider existence of pantry moth' is paralyzing. Your internal 'wave' is flatlining from too many frequencies.",
+        emotionTags: ["Stress", "Overwhelm", "Anxiety", "Worry"],
+        theme: "Mental Load"
+      },
+      {
+        id: 'n2',
+        title: "The Neighbor's Lawn (and Their Seemingly Flawless Life) Conundrum",
+        text: "You glance at the neighbor's perfectly manicured lawn (or their seemingly sparkling clean car) and a sigh escapes. Meanwhile, your own (metaphorical) lawn is a chaotic jungle of neglected chores. A voice-over asks, 'Are their waves truly smoother, or merely filtered through my envy?'",
+        emotionTags: ["Envy", "Jealousy", "Comparison"],
+        theme: "Comparison Trap"
+      },
+      {
+        id: 'n3',
+        title: "The Fridge's Silent Rebellion: A Culinary Dystopia",
+        text: "With grand culinary plans, you open the fridge, only to find a single, forlorn, half-eaten yogurt and a wilted vegetable. The 'expected' meal wave collapses into a 'dreadful' reality, forcing a spontaneous, less-than-ideal solution.",
+        emotionTags: ["Disappointment", "Frustration", "Dread"],
+        theme: "Plans Derail"
+      },
+      {
+        id: 'n4',
+        title: "The Broken Teacup and the Echo of Unsaid Words",
+        text: "You're holding a broken teacup, but the sadness isn't about the porcelain. It's the unexpected vulnerability of the moment, a triggered memory, a feeling of inadequacy, or a sense of loss that has nothing to do with chipped ceramic. The shattered pieces reflect a deeper, unseen hurt.",
+        emotionTags: ["Sadness", "Grief", "Hurt", "Vulnerability"],
+        theme: "Hidden Hurt"
+      },
+      {
+        id: 'n5',
+        title: "The Solo Sofa Symphony: A Quest for Shared Blankets",
+        text: "You sit alone on a large sofa, wrapped in a small blanket, while thought bubbles show other household members engaged in separate, distant activities. The 'wave' of your loneliness pulses gently, longing for constructive interference from another's presence.",
+        emotionTags: ["Loneliness", "Disconnection", "Invisibility"],
+        theme: "Seeking Connection"
+      }
+    ];
+
+    const matching = sampleNarratives.find(narrative =>
+      selectedNarrativeEmotions.some(emotion => narrative.emotionTags.includes(emotion))
+    );
+    return matching || { id: 'default', title: "The Cosmic Blank Canvas", text: "Your unique wave is still forming! Perhaps no existing narrative quite captures its profound depth. Feel free to share your own unique story below!", emotionTags: ["Unique", "Uncategorized"], theme: "Uncharted Territory" };
+  };
+
+  const handleShowMeAStory = () => {
+    const narrative = findMatchingNarrative();
+    setMatchedNarrative(narrative);
+    setNarrativeFeedback(null); // Reset feedback
+  };
+
+  const handleNarrativeFeedback = (feedbackType) => {
+    setNarrativeFeedback(feedbackType);
+    // In a real app, send feedback to Firestore for better matching over time
+    if (feedbackType === 'spot-on') {
+        alert("Wonderful! Your wavelength is beautifully clear. Thank you for this attunement!");
+    } else if (feedbackType === 'close') {
+        alert("Understood. We'll fine-tune our narrative frequencies for next time!");
+    } else if (feedbackType === 'nope') {
+        alert("Ah, the universe is subtle! We'll keep exploring new narrative dimensions.");
+    }
+  };
+
+  // --- Resonance Broadcast Functions ---
+  const vulnerabilityBroadcastsCollection = collection(db, 'vulnerabilityBroadcasts');
+
+  const loadVulnerabilityBroadcasts = async () => {
+    if (!user) return;
+    try {
+      const q = query(vulnerabilityBroadcastsCollection, orderBy('broadcastAt', 'desc'));
+      const querySnapshot = await getDocs(q);
+      const loadedBroadcasts = [];
+      querySnapshot.forEach(d => loadedBroadcasts.push({ id: d.id, ...d.data() }));
+      setVulnerabilityBroadcasts(loadedBroadcasts);
+    } catch (error) {
+      console.error('Error loading vulnerability broadcasts:', error);
+      // Fail silently or give a very gentle alert here
+    }
+  };
+
+  const handleBroadcastVulnerability = async (isAnonymous) => {
+    if (!user || !matchedNarrative) {
+      alert("No narrative selected to broadcast!");
+      return;
+    }
+
+    try {
+      await addDoc(vulnerabilityBroadcastsCollection, {
+        emotionTags: selectedNarrativeEmotions,
+        narrativeTitle: matchedNarrative.title,
+        narrativeTheme: matchedNarrative.theme,
+        broadcasterUid: isAnonymous ? null : user.uid,
+        broadcasterName: isAnonymous ? 'Anonymous Harmonizer' : user.displayName,
+        isAnonymous: isAnonymous,
+        broadcastAt: new Date()
+      });
+      alert("Your revelation has been broadcast to the Harmony Bulletin Board! Thank you for sharing your strength.");
+      closeNarrativeBooth(); // Close the modal
+      await loadVulnerabilityBroadcasts(); // Refresh dashboard broadcasts
+    } catch (error) {
+      console.error('Error broadcasting vulnerability:', error);
+      alert("Failed to broadcast your truth. The cosmic signal is weak today.");
+    }
+  };
+
+  const handleAcknowledgeBroadcast = async (broadcastId) => {
+    // In a real app, you'd update a specific broadcast document
+    // e.g., await updateDoc(doc(vulnerabilityBroadcastsCollection, broadcastId), {
+    //    acknowledgments: arrayUnion(user.uid) // or increment a counter
+    // });
+    alert("You've held space for this broadcast. Thank you for your active listening!");
+    // For simplicity, just refresh for now
+    await loadVulnerabilityBroadcasts();
+  };
+
+  // --- Personal Expression Studio Functions ---
+  const openExpressionStudio = () => {
+    setShowExpressionStudioModal(true);
+    setNewExpressionType('poem'); // Default to poem
+    setNewCreativeTitle('');
+    setNewCreativeContent('');
+    setNewExpressionIsPrivate(false);
+    setComicPanels([{ imageUrl: '', caption: '' }]); // Reset comic panels
+  };
+
+  const closeExpressionStudio = () => {
+    setShowExpressionStudioModal(false);
+  };
+
+  const handleComicPanelChange = (index, field, value) => {
+    const newPanels = [...comicPanels];
+    newPanels[index][field] = value;
+    setComicPanels(newPanels);
+  };
+
+  const addComicPanel = () => {
+    setComicPanels([...comicPanels, { imageUrl: '', caption: '' }]);
+  };
+
+  const removeComicPanel = (index) => {
+    const newPanels = comicPanels.filter((_, i) => i !== index);
+    setComicPanels(newPanels);
+  };
+
+
+  // --- Loading Screen ---
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
@@ -737,8 +1014,8 @@ function App() {
     );
   }
 
-  // Pre-login Vibe Check Screen
-  if (!user || !initialVibeSelected) {
+  // --- Pre-login Vibe Check Screen ---
+  if (!user || (!initialVibeSelected && !user.isAnonymous)) { // isAnonymous check is if Firebase allows anonymous login, not relevant here but good to future proof
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center">
@@ -766,7 +1043,7 @@ function App() {
           </p>
           <button
             onClick={signInWithGoogle}
-            disabled={!myCurrentVibe} // Disable login until vibe is selected
+            disabled={!myCurrentVibe}
             className={`w-full rounded-lg px-6 py-3 text-white font-medium transition-colors flex items-center justify-center gap-3
               ${myCurrentVibe ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'}
             `}
@@ -802,13 +1079,67 @@ function App() {
 
   const collectiveVibe = getCollectiveVibe();
 
-
-  // Main app content
+  // --- Main App Content Renderer ---
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
         return (
           <div className="space-y-6">
+            {/* Collective Vibe Meter */}
+            <div className="bg-white rounded-xl shadow-sm p-6 text-center">
+                <h2 className="text-lg font-semibold text-gray-900 mb-2">Our Collective Vibe!</h2>
+                <div className="flex items-center justify-center gap-4">
+                  <Sun className={`h-10 w-10 ${collectiveVibe.color} animate-pulse`} />
+                  <div>
+                    <p className={`text-3xl font-bold ${collectiveVibe.color}`}>{collectiveVibe.label}</p>
+                    <p className="text-sm text-gray-600">{collectiveVibe.desc}</p>
+                  </div>
+                </div>
+            </div>
+
+            {/* Harmony Bulletin Board / Resonance Broadcasts */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Our Collective Resonance Stream: Vulnerability as Our Shared Strength!</h2>
+              <p className="text-gray-600 mb-4">
+                Behold the bravery of our wave-makers! Each shared expression here is a gift of vulnerability, received with curiosity, active listening, and as much care as we can offer. It is a privilege to hold space for one another's unique journeys.
+              </p>
+              <div className="space-y-4">
+                {vulnerabilityBroadcasts.length > 0 ? (
+                  vulnerabilityBroadcasts.map(broadcast => (
+                    <div key={broadcast.id} className="border border-gray-200 rounded-lg p-4 bg-yellow-50">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Heart className="h-5 w-5 text-red-500" />
+                          <h3 className="font-semibold text-gray-900">
+                            Feeling: {broadcast.emotionTags.join(', ')}
+                          </h3>
+                        </div>
+                        <span className="text-xs text-gray-600">
+                          {broadcast.isAnonymous ? 'Anonymous Harmonizer' : broadcast.broadcasterName}
+                        </span>
+                      </div>
+                      <p className="text-gray-700 text-sm mb-2">
+                        From the narrative: "{broadcast.narrativeTitle}" ({broadcast.narrativeTheme})
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Broadcast at: {new Date(broadcast.broadcastAt.toDate()).toLocaleTimeString()} on {new Date(broadcast.broadcastAt.toDate()).toLocaleDateString()}
+                      </p>
+                      <div className="flex justify-end gap-2 mt-3">
+                        <button
+                          onClick={() => handleAcknowledgeBroadcast(broadcast.id)}
+                          className="px-3 py-1 bg-indigo-500 text-white rounded-lg text-sm hover:bg-indigo-600 transition-colors flex items-center gap-2"
+                        >
+                          <HandHeart className="h-4 w-4" /> I Hear You / Holding Space
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-gray-500 text-center py-8">No shared revelations yet. Perhaps your wave is building, or everyone is perfectly attuned!</p>
+                )}
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-white rounded-xl shadow-sm p-6">
                 <div className="flex items-center justify-between">
@@ -843,18 +1174,6 @@ function App() {
                   <Bell className="h-8 w-8 text-orange-500" />
                 </div>
               </div>
-            </div>
-
-            {/* Collective Vibe Meter */}
-            <div className="bg-white rounded-xl shadow-sm p-6 text-center">
-                <h2 className="text-lg font-semibold text-gray-900 mb-2">Our Collective Vibe!</h2>
-                <div className="flex items-center justify-center gap-4">
-                  <Sun className={`h-10 w-10 ${collectiveVibe.color} animate-pulse`} />
-                  <div>
-                    <p className={`text-3xl font-bold ${collectiveVibe.color}`}>{collectiveVibe.label}</p>
-                    <p className="text-sm text-gray-600">{collectiveVibe.desc}</p>
-                  </div>
-                </div>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm p-6">
@@ -1269,7 +1588,7 @@ function App() {
           </div>
         );
 
-      case 'path-to-good-vibes': // Renamed from 'benefits'
+      case 'path-to-good-vibes':
         return (
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h2 className="text-2xl font-bold text-gray-900 mb-4">The Path to Good Vibes: Why This Isn't Just Another Chore.</h2>
@@ -1328,7 +1647,7 @@ function App() {
           </div>
         );
 
-      case 'clarity-hub': // New: The Clarity Hub (replaces Sync Sessions & Feature Requests conceptually)
+      case 'clarity-hub':
         return (
           <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-sm p-6">
@@ -1364,7 +1683,7 @@ function App() {
                     onChange={(e) => setNewClarityMessage({...newClarityMessage, observation: e.target.value})}
                     placeholder="Describe the situation or observation without assigning blame (e.g., 'The dishwasher was run, but items are still visibly un-clean.')"
                     rows={3}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:focus:border-indigo-500"
                     required
                   />
                 </div>
@@ -1379,7 +1698,7 @@ function App() {
                     onChange={(e) => setNewClarityMessage({...newClarityMessage, question: e.target.value})}
                     placeholder="Frame this as a question or a need for shared understanding/decision (e.g., 'What process can we use to ensure items are clean before a cycle?')"
                     rows={3}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:focus:border-indigo-500"
                     required
                   />
                 </div>
@@ -1394,7 +1713,7 @@ function App() {
                     onChange={(e) => setNewClarityMessage({...newClarityMessage, suggestedResolution: e.target.value})}
                     placeholder="Optional: Propose a way forward, if you have a clear frequency in mind."
                     rows={2}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:focus:border-indigo-500"
                   />
                 </div>
                 
@@ -1426,7 +1745,7 @@ function App() {
                         Added by {message.userName} on {new Date(message.createdAt.toDate()).toLocaleDateString()}
                       </p>
                       <div className="flex justify-end gap-2 mt-3">
-                          {message.userId === user.uid && ( // Only the creator can delete
+                          {message.userId === user.uid && (
                             <button
                               onClick={() => deleteClarityMessage(message.id, message.title)}
                               className="text-red-500 hover:text-red-700 transition-colors"
@@ -1559,9 +1878,21 @@ function App() {
                             {creative.type === 'song' && <Music className="h-5 w-5 text-blue-600" />}
                             {creative.type === 'art' && <Palette className="h-5 w-5 text-green-600" />}
                             {creative.type === 'random-thought' && <Lightbulb className="h-5 w-5 text-gray-600" />}
+                            {creative.type === 'comic-book' && <Image className="h-5 w-5 text-indigo-600" />} {/* Icon for comic book */}
                             <h3 className="font-medium text-gray-900">{creative.title} <span className="text-sm text-gray-500 ml-2">({creative.type.charAt(0).toUpperCase() + creative.type.slice(1)})</span></h3>
                           </div>
-                          <p className="text-gray-600 text-sm mt-1 whitespace-pre-wrap">{creative.content}</p>
+                          {creative.type === 'comic-book' ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                                  {creative.comicPanels && creative.comicPanels.map((panel, idx) => (
+                                      <div key={idx} className="border border-gray-300 p-2 rounded">
+                                          {panel.imageUrl && <img src={panel.imageUrl} alt={`Comic Panel ${idx + 1}`} className="w-full h-auto object-cover mb-2 rounded" />}
+                                          {panel.caption && <p className="text-gray-700 text-sm italic">{panel.caption}</p>}
+                                      </div>
+                                  ))}
+                              </div>
+                          ) : (
+                              <p className="text-gray-600 text-sm mt-1 whitespace-pre-wrap">{creative.content}</p>
+                          )}
                           {/* Basic handling for links */}
                           {(creative.type === 'art' || creative.type === 'song') && creative.content.startsWith('http') && (
                             <a href={creative.content} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline text-sm">
@@ -1571,6 +1902,9 @@ function App() {
                           <p className="text-xs text-gray-500 mt-2">
                             Shared by {creative.userName} on {new Date(creative.createdAt.toDate()).toLocaleDateString()}
                           </p>
+                          {creative.privacy === 'private' && (
+                              <span className="ml-2 px-2 py-0.5 bg-gray-200 text-gray-700 text-xs rounded-full flex items-center gap-1"><Lock className="h-3 w-3" /> Private</span>
+                          )}
                         </div>
                         <button
                           onClick={() => deleteHarmonyCreative(creative.id, creative.type)}
@@ -1589,6 +1923,135 @@ function App() {
                 )}
               </div>
             </div>
+          </div>
+        );
+
+      case 'personal-expression-studio': // New tab for creating personal narratives
+        return (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">The Personal Expression Studio: Weave Your Own Narrative!</h2>
+            <p className="text-gray-600 mb-6">
+              Welcome to your canvas for emotional truth! Here, **all forms of expression are welcome, and seen and heard with no judgment. We approach your creations with simple curiosity, active listening, and as much care as we have capacity for.** Your unique wave is safe to share.
+            </p>
+
+            <form onSubmit={addHarmonyCreative} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Choose Your Medium (How will your wave manifest?):
+                </label>
+                <select
+                  value={newExpressionType}
+                  onChange={(e) => {
+                    setNewExpressionType(e.target.value);
+                    setNewCreativeType(e.target.value); // Keep sync with creativeType for storage
+                    setComicPanels([{ imageUrl: '', caption: '' }]); // Reset comic panels on type change
+                    setNewCreativeContent(''); // Clear content as it might be different for each type
+                  }}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="poem">Poem ✍️ (Compose your resonant words.)</option>
+                  <option value="song">Song/Lyrics 🎶 (Let your feelings find their rhythm.)</option>
+                  <option value="comic-book">Comic Book 🖼️ (Capture moments from your wave visually and textually.)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Give your masterpiece a title (Optional, but encouraged for posterity!)
+                </label>
+                <input
+                  type="text"
+                  value={newCreativeTitle}
+                  onChange={(e) => setNewCreativeTitle(e.target.value)}
+                  placeholder={
+                    newExpressionType === 'poem' ? "e.g., 'Ode to a Clean Toilet'" :
+                    newExpressionType === 'song' ? "e.g., 'The Ballad of the Unmatched Socks'" :
+                    "e.g., 'The Great Dust Bunny Conspiracy'"
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+
+              {newExpressionType === 'comic-book' ? (
+                <div className="space-y-4">
+                  <h4 className="text-md font-semibold text-gray-900 mb-2">Comic Panels:</h4>
+                  {comicPanels.map((panel, index) => (
+                    <div key={index} className="border border-gray-200 p-4 rounded-lg bg-gray-50 relative">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">Panel {index + 1}</h5>
+                      <input
+                        type="text"
+                        value={panel.imageUrl}
+                        onChange={(e) => handleComicPanelChange(index, 'imageUrl', e.target.value)}
+                        placeholder="Image URL (e.g., from Imgur, Unsplash)"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-2 focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <textarea
+                        value={panel.caption}
+                        onChange={(e) => handleComicPanelChange(index, 'caption', e.target.value)}
+                        placeholder="Caption or dialogue for this panel"
+                        rows="2"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500"
+                      />
+                      {comicPanels.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeComicPanel(index)}
+                          className="absolute top-2 right-2 text-red-500 hover:text-red-700"
+                          title="Remove Panel"
+                        >
+                          <XCircle className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addComicPanel}
+                    className="w-full px-4 py-2 border border-dashed border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Plus className="h-4 w-4" /> Add Panel
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Your Creative Spark (text or external link):
+                  </label>
+                  <textarea
+                    value={newCreativeContent}
+                    onChange={(e) => setNewCreativeContent(e.target.value)}
+                    placeholder={
+                      newExpressionType === 'poem' ? "Type your poem here..." :
+                      "Type your song lyrics here, or paste a link to your audio recording (e.g., SoundCloud, Vocaroo)"
+                    }
+                    rows={8}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    required
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="expression-private"
+                  checked={newExpressionIsPrivate}
+                  onChange={(e) => setNewExpressionIsPrivate(e.target.checked)}
+                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                />
+                <label htmlFor="expression-private" className="text-sm text-gray-700">
+                  Keep this Private (Only I can see this expression of my wave)
+                </label>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full px-6 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <PenTool className="h-4 w-4" />
+                Unleash Your Personal Expression!
+              </button>
+            </form>
           </div>
         );
 
@@ -1667,7 +2130,7 @@ function App() {
                         <p className="text-xs text-gray-500">Type: {request.trainingType} | Status: {request.status}</p>
                         {request.notes && <p className="text-xs text-gray-500 italic mt-1">Notes: "{request.notes}"</p>}
                       </div>
-                      {(request.requestedBy === user.uid) && ( // Only requester can delete their request
+                      {(request.requestedBy === user.uid) && (
                         <button
                           onClick={() => deleteTrainingRequest(request.id, request.skillName)}
                           className="text-red-500 hover:text-red-700 transition-colors ml-4"
@@ -1741,16 +2204,11 @@ function App() {
           </div>
         );
 
-      // Removed 'feature-requests' and 'sync-session-ideas' as separate cases, now covered by 'clarity-hub'
-      // The old content will not be rendered directly. You can uncomment to retain old if needed.
+      // --- Removed old Feature Requests and Sync Session Ideas as they're now under Clarity Hub or replaced ---
       // case 'feature-requests':
-      //   return (
-      //     ... (old feature requests content) ...
-      //   );
+      //   return (...)
       // case 'sync-session-ideas':
-      //   return (
-      //     ... (old sync session ideas content) ...
-      //   );
+      //   return (...)
 
       default:
         return (
@@ -1778,7 +2236,7 @@ function App() {
                   <input
                     type="text"
                     value={quickAddTaskText}
-                    onChange={(e) => setNewTaskText(e.target.value)}
+                    onChange={(e) => setNewTask(e.target.value)} // Changed from setNewTaskText to setNewTask
                     placeholder="Quick task? (Before it escapes!)"
                     className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 w-40"
                   />
@@ -1826,14 +2284,13 @@ function App() {
                 {[
                   { id: 'dashboard', label: 'Our Harmony Dashboard', icon: Home },
                   { id: 'tasks', label: 'All Harmony Tasks', icon: CheckCircle },
-                  { id: 'clarity-hub', label: 'The Clarity Hub', icon: MessageCircleQuestion }, // New Clarity Hub Tab
+                  { id: 'clarity-hub', label: 'The Clarity Hub', icon: MessageCircleQuestion },
                   { id: 'harmony-gallery', label: 'Harmony Gallery & Bard Booth', icon: Heart },
+                  { id: 'personal-expression-studio', label: 'My Creative Canvas', icon: PenTool }, // New tab for creation
                   { id: 'our-harmony-guide', label: 'Our Harmony Guide', icon: BookOpen },
                   { id: 'path-to-good-vibes', label: 'The Path to Good Vibes', icon: Award },
                   { id: 'family', label: 'Our Awesome Household', icon: Users },
                   { id: 'skill-hub', label: 'The Skill Hub', icon: GraduationCap },
-                  // { id: 'feature-requests', label: 'Bright Ideas & Wishes', icon: Lightbulb }, // Removed
-                  // { id: 'sync-session-ideas', label: 'Sync Session Ideas', icon: MessageSquare }, // Removed
                   { id: 'budget', label: 'Budget', icon: DollarSign },
                   { id: 'settings', label: 'Settings', icon: Settings }
                 ].map(({ id, label, icon: Icon }) => (
@@ -1859,7 +2316,259 @@ function App() {
           </div>
         </div>
       </div>
-    </div>
+
+      {/* Harmony Narrative Booth Modal */}
+      {showNarrativeBoothModal && (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-2xl p-8 max-w-2xl w-full relative">
+            <button
+              onClick={closeNarrativeBooth}
+              className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
+            >
+              <XCircle className="h-6 w-6" />
+            </button>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4 text-center">Harmony Narrative Booth: Weave Your Feelings!</h2>
+            <p className="text-gray-600 mb-6 text-center">
+              It takes immense strength to name your feelings. From the "Atlas of the Heart," select the emotions that resonate with your current, past, or even future (anxiety) wavelength.
+            </p>
+
+            {!matchedNarrative ? (
+              <>
+                <div className="mb-6 space-y-4 max-h-96 overflow-y-auto pr-2">
+                  {humanEmotionsAtlas.map(categoryData => (
+                    <div key={categoryData.category} className="border-b border-gray-200 pb-3 last:border-b-0">
+                      <h3 className="text-lg font-semibold text-gray-800 mb-2">{categoryData.category}</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {categoryData.emotions.map(emotion => (
+                          <button
+                            key={emotion}
+                            onClick={() => handleEmotionSelection(emotion)}
+                            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors
+                              ${selectedNarrativeEmotions.includes(emotion) ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}
+                            `}
+                          >
+                            {emotion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={handleShowMeAStory}
+                  disabled={selectedNarrativeEmotions.length === 0}
+                  className={`w-full px-6 py-3 rounded-lg text-white font-medium transition-colors flex items-center justify-center gap-2
+                    ${selectedNarrativeEmotions.length > 0 ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'}
+                  `}
+                >
+                  <BookOpen className="h-5 w-5" />
+                  Show Me a Story! (Let's see if this resonates!)
+                </button>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <h3 className="text-xl font-bold text-gray-900 text-center mb-2">
+                  Oh. Here's a story. Is this about right about how you feel?
+                </h3>
+                <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-left shadow-sm">
+                  <h4 className="text-lg font-semibold text-gray-800 mb-1">{matchedNarrative.title}</h4>
+                  <p className="text-gray-700 italic">"{matchedNarrative.text}"</p>
+                  <p className="text-xs text-gray-500 mt-2">
+                    (Themes: {matchedNarrative.theme})
+                  </p>
+                </div>
+
+                <div className="flex justify-center gap-4 mt-6">
+                  <button
+                    onClick={() => handleNarrativeFeedback('spot-on')}
+                    className={`px-4 py-2 rounded-lg text-white font-medium transition-colors ${narrativeFeedback === 'spot-on' ? 'bg-green-600' : 'bg-green-500 hover:bg-green-600'}`}
+                  >
+                    Spot On! 🎉
+                  </button>
+                  <button
+                    onClick={() => handleNarrativeFeedback('close')}
+                    className={`px-4 py-2 rounded-lg text-white font-medium transition-colors ${narrativeFeedback === 'close' ? 'bg-yellow-600' : 'bg-yellow-500 hover:bg-yellow-600'}`}
+                  >
+                    Close, But Not Quite 🤔
+                  </button>
+                  <button
+                    onClick={() => handleNarrativeFeedback('nope')}
+                    className={`px-4 py-2 rounded-lg text-white font-medium transition-colors ${narrativeFeedback === 'nope' ? 'bg-red-600' : 'bg-red-500 hover:bg-red-600'}`}
+                  >
+                    Nope, Not Me 🤷‍♀️
+                  </button>
+                </div>
+
+                {narrativeFeedback && (
+                  <div className="mt-6 border-t pt-4 text-center">
+                    <p className="text-gray-700 font-semibold mb-3">
+                      Your vulnerability is a gift. Would you like to share this piece of your journey with the household?
+                    </p>
+                    <div className="flex justify-center gap-4">
+                      <button
+                        onClick={() => handleBroadcastVulnerability(false)}
+                        className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                      >
+                        <Globe className="h-5 w-5" /> Broadcast My Revelation!
+                      </button>
+                      <button
+                        onClick={() => handleBroadcastVulnerability(true)}
+                        className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2"
+                      >
+                        <User className="h-5 w-5" /> Share Anonymously
+                      </button>
+                      <button
+                        onClick={closeNarrativeBooth}
+                        className="px-6 py-3 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition-colors"
+                      >
+                        Just For Me (Keep this wave private)
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Personal Expression Studio Modal */}
+      {showExpressionStudioModal && (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl p-8 max-w-2xl w-full relative my-8">
+            <button
+              onClick={closeExpressionStudio}
+              className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
+            >
+              <XCircle className="h-6 w-6" />
+            </button>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4 text-center">The Personal Expression Studio: Weave Your Own Narrative!</h2>
+            <p className="text-gray-600 mb-6 text-center">
+              Welcome to your canvas for emotional truth! Here, **all forms of expression are welcome, and seen and heard with no judgment. We approach your creations with simple curiosity, active listening, and as much care as we have capacity for.** Your unique wave is safe to share.
+            </p>
+
+            <form onSubmit={addHarmonyCreative} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Choose Your Medium (How will your wave manifest?):
+                </label>
+                <select
+                  value={newExpressionType}
+                  onChange={(e) => {
+                    setNewExpressionType(e.target.value);
+                    setNewCreativeType(e.target.value); // Keep sync with creativeType for storage
+                    setComicPanels([{ imageUrl: '', caption: '' }]); // Reset comic panels on type change
+                    setNewCreativeContent(''); // Clear content as it might be different for each type
+                  }}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="poem">Poem ✍️ (Compose your resonant words.)</option>
+                  <option value="song">Song/Lyrics 🎶 (Let your feelings find their rhythm.)</option>
+                  <option value="comic-book">Comic Book 🖼️ (Capture moments from your wave visually and textually.)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Give your masterpiece a title (Optional, but encouraged for posterity!)
+                </label>
+                <input
+                  type="text"
+                  value={newCreativeTitle}
+                  onChange={(e) => setNewCreativeTitle(e.target.value)}
+                  placeholder={
+                    newExpressionType === 'poem' ? "e.g., 'Ode to a Clean Toilet'" :
+                    newExpressionType === 'song' ? "e.g., 'The Ballad of the Unmatched Socks'" :
+                    "e.g., 'The Great Dust Bunny Conspiracy'"
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+
+              {newExpressionType === 'comic-book' ? (
+                <div className="space-y-4">
+                  <h4 className="text-md font-semibold text-gray-900 mb-2">Comic Panels:</h4>
+                  {comicPanels.map((panel, index) => (
+                    <div key={index} className="border border-gray-200 p-4 rounded-lg bg-gray-50 relative">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">Panel {index + 1}</h5>
+                      <input
+                        type="text"
+                        value={panel.imageUrl}
+                        onChange={(e) => handleComicPanelChange(index, 'imageUrl', e.target.value)}
+                        placeholder="Image URL (e.g., from Imgur, Unsplash) - for visual wave manifestation"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-2 focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <textarea
+                        value={panel.caption}
+                        onChange={(e) => handleComicPanelChange(index, 'caption', e.target.value)}
+                        placeholder="Caption or dialogue for this panel (What's your wave saying here?)"
+                        rows="2"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500"
+                      />
+                      {comicPanels.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeComicPanel(index)}
+                          className="absolute top-2 right-2 text-red-500 hover:text-red-700"
+                          title="Remove Panel"
+                        >
+                          <XCircle className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addComicPanel}
+                    className="w-full px-4 py-2 border border-dashed border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Plus className="h-4 w-4" /> Add Panel (Add another ripple to your story!)
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Your Creative Spark (text or external link to audio/image):
+                  </label>
+                  <textarea
+                    value={newCreativeContent}
+                    onChange={(e) => setNewCreativeContent(e.target.value)}
+                    placeholder={
+                      newExpressionType === 'poem' ? "Type your poem here... Let your unique wavelength take form in words." :
+                      "Type your song lyrics here, or paste a link to your audio recording (e.g., SoundCloud, Vocaroo). Let your feelings find their rhythm."
+                    }
+                    rows={8}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    required
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="expression-private"
+                  checked={newExpressionIsPrivate}
+                  onChange={(e) => setNewExpressionIsPrivate(e.target.checked)}
+                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                />
+                <label htmlFor="expression-private" className="text-sm text-gray-700">
+                  Keep this Private (Only I can see this expression of my wave)
+                </label>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full px-6 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <PenTool className="h-4 w-4" />
+                Unleash Your Personal Expression!
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div> // End of main app div (do not delete this line!)
   );
 }
 

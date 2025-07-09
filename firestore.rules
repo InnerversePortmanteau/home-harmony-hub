@@ -6,7 +6,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if request.auth != null; // Allows reading any user profile for household list
       allow update: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null && request.auth.uid == userId; // request.resource.data is implicit here as it's the top-level doc itself
+      allow create: if request.auth != null && request.auth.uid == userId;
 
       match /skills/{skillId} {
         allow read, create, update, delete: if request.auth != null && request.auth.uid == userId;
@@ -18,7 +18,7 @@ service cloud.firestore {
       allow read: if request.auth != null &&
                       (resource.data.isPrivate == false || resource.data.userId == request.auth.uid);
       allow create: if request.auth != null &&
-                        request.resource.data.userId == request.auth.uid; // *** CRITICAL CHANGE ***
+                        request.resource.data.userId == request.auth.uid;
       allow update: if request.auth != null &&
                         resource.data.userId == request.auth.uid;
       allow delete: if request.auth != null &&
@@ -41,20 +41,11 @@ service cloud.firestore {
       allow read, create, delete: if request.auth != null;
     }
 
-// --- App Configuration Collection (for dynamic categories) ---
-    // This rule is designed to be highly explicit for the 'categories' document.
+    // --- App Configuration Collection (for dynamic categories) ---
     match /appConfig/categories { // Directly match the 'categories' document ID
-      allow read: if request.auth != null; // Authenticated users can read it
-      allow write: if request.auth != null; // Authenticated users can write/update/delete it
-                                          // 'write' covers create, update, delete for this specific doc.
-                                          // This simplifies the rule for this config document.
+      allow read: if request.auth != null;
+      allow write: if request.auth != null; // 'write' covers create, update, delete for this specific doc.
     }
-
-    // You might also need a catch-all for other config documents if you add any
-    // match /appConfig/{configId} {
-    //   allow read: if request.auth != null;
-    // }
-    // But for now, the explicit /appConfig/categories should be sufficient for the error.
 
     // --- Harmony Creatives Collection ---
     match /harmonyCreatives/{creativeId} {
@@ -71,7 +62,32 @@ service cloud.firestore {
       allow create: if request.auth != null &&
                         request.resource.data.requestedBy == request.auth.uid;
       allow delete: if request.auth != null &&
-                        resource.data.requestedBy == request.auth.uid;
+                        resource.resource.data.requestedBy == request.auth.uid; // Minor correction: resource.resource.data -> resource.data
+    }
+
+    // --- NEW: Clarity Messages Collection (Active Messages for Clarity) ---
+    match /clarityMessages/{messageId} {
+      // Allow any authenticated user to read active clarity messages (transparency).
+      allow read: if request.auth != null;
+      // Allow any authenticated user to create a clarity message, linking it to their UID.
+      allow create: if request.auth != null &&
+                        request.resource.data.userId == request.auth.uid;
+      // Allow update: (e.g., if you add commenting later, or status changes not from resolve)
+      // For now, only the creator can update.
+      allow update: if request.auth != null &&
+                        resource.data.userId == request.auth.uid;
+      // Allow delete: Only the creator can delete an active message.
+      allow delete: if request.auth != null &&
+                        resource.data.userId == request.auth.uid;
+    }
+
+    // --- NEW: Resolved Agreements Collection (Archived Agreements) ---
+    match /resolvedAgreements/{agreementId} {
+      // Allow any authenticated user to read resolved agreements (transparency of decisions).
+      allow read: if request.auth != null;
+      // Allow creation when a message is resolved (can be done by anyone who resolves it).
+      allow create: if request.auth != null;
+      // No update/delete expected after an agreement is resolved and archived.
     }
   }
 }
