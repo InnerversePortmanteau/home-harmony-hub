@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy, updateDoc } from 'firebase/firestore';
 import { auth, googleProvider, db } from './firebase';
-import { CheckCircle, Plus, Trash2, Calendar, User, LogOut, Home, Users, DollarSign, Settings, Bell, Lightbulb, Send } from 'lucide-react';
+import { CheckCircle, Plus, Trash2, Calendar, User, LogOut, Home, Users, DollarSign, Settings, Bell, Lightbulb, Send, Globe, Lock, UserCheck } from 'lucide-react';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -13,6 +13,29 @@ function App() {
   const [featureRequests, setFeatureRequests] = useState([]);
   const [newFeatureRequest, setNewFeatureRequest] = useState({ title: '', description: '', priority: 'medium' });
 
+  // New state for task creation/editing
+  const [newTaskCategory, setNewTaskCategory] = useState('');
+  const [newTaskIsPrivate, setNewTaskIsPrivate] = useState(false);
+  const [familyMembers, setFamilyMembers] = useState([]); // To store other users for assignment (simplified for now)
+
+
+  // Suggested Categories for household responsibilities
+const taskCategories = [
+    'General',
+    'Cleaning',
+    'Cooking & Meal Prep',
+    'Shopping & Errands',
+    'Yard Work & Outdoor',
+    'Pet Care',
+    'Home Maintenance & Repairs',
+    'Bills & Finances',
+    'Appointments & Planning',
+    'Vehicle Maintenance',
+    'Tech & Gadgets',
+    'Donations & Decluttering',
+    'Health & Wellness'
+  ];
+
   // Authentication state listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -22,14 +45,18 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  // Load tasks when user changes
+  // Load tasks and family members when user changes
   useEffect(() => {
     if (user) {
       loadTasks();
       loadFeatureRequests();
+      // In a real app, you'd fetch family members from a 'users' collection
+      // For now, let's simulate by just having the current user as an option
+      setFamilyMembers([{ uid: user.uid, displayName: user.displayName, email: user.email }]);
     } else {
       setTasks([]);
       setFeatureRequests([]);
+      setFamilyMembers([]);
     }
   }, [user]);
 
@@ -56,17 +83,41 @@ function App() {
     if (!user) return;
     
     try {
-      const q = query(
+      // Fetch tasks: private tasks for the current user AND shared tasks
+      const qPrivate = query(
         collection(db, 'tasks'),
         where('userId', '==', user.uid),
         orderBy('createdAt', 'desc')
       );
-      const querySnapshot = await getDocs(q);
-      const loadedTasks = [];
-      querySnapshot.forEach((doc) => {
-        loadedTasks.push({ id: doc.id, ...doc.data() });
+      const qShared = query(
+        collection(db, 'tasks'),
+        where('isPrivate', '==', false), // Only fetch shared tasks
+        where('userId', '!=', user.uid), // Don't fetch tasks already covered by qPrivate
+        orderBy('createdAt', 'desc')
+      );
+
+      const [privateSnapshot, sharedSnapshot] = await Promise.all([
+        getDocs(qPrivate),
+        getDocs(qShared),
+      ]);
+
+      const loadedTasksMap = new Map();
+
+      privateSnapshot.forEach((doc) => {
+        loadedTasksMap.set(doc.id, { id: doc.id, ...doc.data() });
       });
-      setTasks(loadedTasks);
+
+      sharedSnapshot.forEach((doc) => {
+        // Only add shared tasks that aren't already added as private tasks by the current user
+        if (!loadedTasksMap.has(doc.id)) {
+          loadedTasksMap.set(doc.id, { id: doc.id, ...doc.data() });
+        }
+      });
+      
+      // Convert map values back to an array and sort by createdAt
+      const allLoadedTasks = Array.from(loadedTasksMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+      setTasks(allLoadedTasks);
+
     } catch (error) {
       console.error('Error loading tasks:', error);
     }
@@ -82,9 +133,16 @@ function App() {
         text: newTask,
         completed: false,
         userId: user.uid,
+        userName: user.displayName, // Store creator's name
+        isPrivate: newTaskIsPrivate, // New field
+        assignedTo: null, // New field, initially unassigned
+        assignedToName: null, // New field
+        category: newTaskCategory || 'General', // New field, default to 'General'
         createdAt: new Date()
       });
       setNewTask('');
+      setNewTaskCategory('');
+      setNewTaskIsPrivate(false);
       await loadTasks(); // Reload tasks
     } catch (error) {
       console.error('Error adding task:', error);
@@ -101,7 +159,34 @@ function App() {
     }
   };
 
-  // Load feature requests from Firestore
+  // Toggle task completion
+  const toggleTaskCompletion = async (task) => {
+    try {
+      const taskRef = doc(db, 'tasks', task.id);
+      await updateDoc(taskRef, {
+        completed: !task.completed
+      });
+      await loadTasks();
+    } catch (error) {
+      console.error('Error toggling task completion:', error);
+    }
+  };
+
+  // Assign task to a user
+  const assignTask = async (taskId, assignedUserUid, assignedUserName) => {
+    try {
+      const taskRef = doc(db, 'tasks', taskId);
+      await updateDoc(taskRef, {
+        assignedTo: assignedUserUid,
+        assignedToName: assignedUserName,
+      });
+      await loadTasks();
+    } catch (error) {
+      console.error('Error assigning task:', error);
+    }
+  };
+
+  // Load feature requests from Firestore (no changes here for this request)
   const loadFeatureRequests = async () => {
     if (!user) return;
     
@@ -122,7 +207,7 @@ function App() {
     }
   };
 
-  // Add feature request to Firestore
+  // Add feature request to Firestore (no changes here for this request)
   const addFeatureRequest = async (e) => {
     e.preventDefault();
     if (!newFeatureRequest.title.trim() || !newFeatureRequest.description.trim() || !user) return;
@@ -145,7 +230,7 @@ function App() {
     }
   };
 
-  // Delete feature request from Firestore
+  // Delete feature request from Firestore (no changes here for this request)
   const deleteFeatureRequest = async (requestId) => {
     try {
       await deleteDoc(doc(db, 'featureRequests', requestId));
@@ -237,20 +322,51 @@ function App() {
 
             <div className="bg-white rounded-xl shadow-sm p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Add Task</h2>
-              <form onSubmit={addTask} className="flex gap-3">
-                <input
-                  type="text"
-                  value={newTask}
-                  onChange={(e) => setNewTask(e.target.value)}
-                  placeholder="What needs to be done?"
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                />
+              <form onSubmit={addTask} className="space-y-4">
+                <div>
+                  <input
+                    type="text"
+                    value={newTask}
+                    onChange={(e) => setNewTask(e.target.value)}
+                    placeholder="What needs to be done?"
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-full"
+                  />
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <label htmlFor="task-category" className="text-sm text-gray-700">Category:</label>
+                  <select
+                    id="task-category"
+                    value={newTaskCategory}
+                    onChange={(e) => setNewTaskCategory(e.target.value)}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="">Select Category</option>
+                    {taskCategories.map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="private-task"
+                    checked={newTaskIsPrivate}
+                    onChange={(e) => setNewTaskIsPrivate(e.target.checked)}
+                    className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="private-task" className="text-sm text-gray-700">
+                    Make this task private (only visible to you)
+                  </label>
+                </div>
+
                 <button
                   type="submit"
-                  className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                  className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
                 >
                   <Plus className="h-4 w-4" />
-                  Add
+                  Add Task
                 </button>
               </form>
             </div>
@@ -260,18 +376,25 @@ function App() {
               <div className="space-y-3">
                 {tasks.slice(0, 5).map((task) => (
                   <div key={task.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <CheckCircle className={`h-5 w-5 ${task.completed ? 'text-green-500' : 'text-gray-400'}`} />
+                    <div className="flex items-center gap-3 flex-1">
+                      <button onClick={() => toggleTaskCompletion(task)} className="focus:outline-none">
+                        <CheckCircle className={`h-5 w-5 ${task.completed ? 'text-green-500' : 'text-gray-400'}`} />
+                      </button>
                       <span className={task.completed ? 'line-through text-gray-500' : 'text-gray-900'}>
                         {task.text}
+                        {task.category && <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">{task.category}</span>}
+                        {task.isPrivate ? <Lock className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Private Task" /> : <Globe className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Shared Task" />}
+                        {task.assignedToName && <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full flex items-center gap-1"><UserCheck className="h-3 w-3" />{task.assignedToName}</span>}
                       </span>
                     </div>
-                    <button
-                      onClick={() => deleteTask(task.id)}
-                      className="text-red-500 hover:text-red-700 transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    {task.userId === user.uid && ( // Only the creator can delete
+                      <button
+                        onClick={() => deleteTask(task.id)}
+                        className="text-red-500 hover:text-red-700 transition-colors ml-2"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 ))}
                 {tasks.length === 0 && (
@@ -289,24 +412,73 @@ function App() {
             <div className="space-y-3">
               {tasks.map((task) => (
                 <div key={task.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle className={`h-5 w-5 ${task.completed ? 'text-green-500' : 'text-gray-400'}`} />
+                  <div className="flex items-center gap-3 flex-1">
+                    <button onClick={() => toggleTaskCompletion(task)} className="focus:outline-none">
+                      <CheckCircle className={`h-5 w-5 ${task.completed ? 'text-green-500' : 'text-gray-400'}`} />
+                    </button>
                     <span className={task.completed ? 'line-through text-gray-500' : 'text-gray-900'}>
                       {task.text}
+                      {task.category && <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">{task.category}</span>}
+                      {task.isPrivate ? <Lock className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Private Task" /> : <Globe className="ml-2 h-4 w-4 text-gray-500 inline-block" title="Shared Task" />}
+                      {task.assignedToName && <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full flex items-center gap-1"><UserCheck className="h-3 w-3" />{task.assignedToName}</span>}
                     </span>
                   </div>
-                  <button
-                    onClick={() => deleteTask(task.id)}
-                    className="text-red-500 hover:text-red-700 transition-colors"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {!task.assignedTo && !task.isPrivate && ( // Can only assign shared tasks
+                       <button
+                         onClick={() => assignTask(task.id, user.uid, user.displayName)}
+                         className="px-3 py-1 bg-green-500 text-white rounded-md text-sm hover:bg-green-600 transition-colors"
+                       >
+                         Assign to Me
+                       </button>
+                    )}
+                    {task.assignedTo === user.uid && ( // Only current assignee can unassign
+                      <button
+                        onClick={() => assignTask(task.id, null, null)}
+                        className="px-3 py-1 bg-yellow-500 text-white rounded-md text-sm hover:bg-yellow-600 transition-colors"
+                      >
+                        Unassign
+                      </button>
+                    )}
+                    {task.userId === user.uid && ( // Only the creator can delete
+                      <button
+                        onClick={() => deleteTask(task.id)}
+                        className="text-red-500 hover:text-red-700 transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
               {tasks.length === 0 && (
                 <p className="text-gray-500 text-center py-8">No tasks yet. Add one from the dashboard!</p>
               )}
             </div>
+          </div>
+        );
+
+      case 'family': // Placeholder for Family management
+        return (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Family Members</h2>
+            <p className="text-gray-600 mb-4">Manage your family members here. In a full application, this would involve inviting members and setting up their accounts.</p>
+            <div className="space-y-3">
+              {familyMembers.map((member) => (
+                <div key={member.uid} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                  <User className="h-5 w-5 text-indigo-500" />
+                  <span className="font-medium">{member.displayName}</span>
+                  <span className="text-gray-500 text-sm">({member.email})</span>
+                  {member.uid === user.uid && <span className="ml-auto px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">You</span>}
+                </div>
+              ))}
+              {familyMembers.length === 0 && (
+                <p className="text-gray-500 text-center py-8">No family members added yet.</p>
+              )}
+            </div>
+             <p className="mt-6 text-gray-600 text-sm">
+                *Note: For a real multi-user family app, you would need more robust user management, including a way to invite and manage family members, perhaps a "family code" system or administrator roles to ensure security and privacy. This current implementation loads tasks based on `userId` (for private tasks) and `isPrivate: false` (for shared tasks), and `familyMembers` is a simplified placeholder.
+            </p>
           </div>
         );
 
@@ -465,8 +637,8 @@ function App() {
                 {[
                   { id: 'dashboard', label: 'Dashboard', icon: Home },
                   { id: 'tasks', label: 'Tasks', icon: CheckCircle },
-                  { id: 'feature-requests', label: 'Feature Requests', icon: Lightbulb },
                   { id: 'family', label: 'Family', icon: Users },
+                  { id: 'feature-requests', label: 'Feature Requests', icon: Lightbulb },
                   { id: 'budget', label: 'Budget', icon: DollarSign },
                   { id: 'settings', label: 'Settings', icon: Settings }
                 ].map(({ id, label, icon: Icon }) => (
