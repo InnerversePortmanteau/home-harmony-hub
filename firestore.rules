@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Users Collection (User Profiles, MySpace Info, Skills) ---
+    match /users/{userId} {
+      allow read: if request.auth != null; // Allows reading any user profile for household list
+      allow update: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId; // request.resource.data is implicit here as it's the top-level doc itself
+
+      match /skills/{skillId} {
+        allow read, create, update, delete: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // --- Tasks Collection ---
+    match /tasks/{taskId} {
+      allow read: if request.auth != null &&
+                      (resource.data.isPrivate == false || resource.data.userId == request.auth.uid);
+      allow create: if request.auth != null &&
+                        request.resource.data.userId == request.auth.uid; // *** CRITICAL CHANGE ***
+      allow update: if request.auth != null &&
+                        resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null &&
+                        resource.data.userId == request.auth.uid;
+    }
+
+    // --- Feature Requests Collection ---
+    match /featureRequests/{requestId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null &&
+                        request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null &&
+                        resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null &&
+                        resource.data.userId == request.auth.uid;
+    }
+
+    // --- Sync Session Ideas Collection ---
+    match /syncSessionIdeas/{ideaId} {
+      allow read, create, delete: if request.auth != null;
+    }
+
+// --- App Configuration Collection (for dynamic categories) ---
+    // This rule is designed to be highly explicit for the 'categories' document.
+    match /appConfig/categories { // Directly match the 'categories' document ID
+      allow read: if request.auth != null; // Authenticated users can read it
+      allow write: if request.auth != null; // Authenticated users can write/update/delete it
+                                          // 'write' covers create, update, delete for this specific doc.
+                                          // This simplifies the rule for this config document.
+    }
+
+    // You might also need a catch-all for other config documents if you add any
+    // match /appConfig/{configId} {
+    //   allow read: if request.auth != null;
+    // }
+    // But for now, the explicit /appConfig/categories should be sufficient for the error.
+
+    // --- Harmony Creatives Collection ---
+    match /harmonyCreatives/{creativeId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null &&
+                        request.resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null &&
+                        resource.data.userId == request.auth.uid;
+    }
+
+    // --- Training Requests Collection ---
+    match /trainingRequests/{requestId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null &&
+                        request.resource.data.requestedBy == request.auth.uid;
+      allow delete: if request.auth != null &&
+                        resource.data.requestedBy == request.auth.uid;
+    }
+  }
+}
